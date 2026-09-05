@@ -185,6 +185,102 @@ extension ClaudeProviderTests {
 }
 
 extension ClaudeProviderTests {
+  @Test("live diagnostics distinguish missing, null, and object windows")
+  func liveDiagnosticsDistinguishMissingNullAndObjectWindows() {
+    let missing = ClaudeLiveHTTPDiagnostic.classify(statusCode: 200, data: Data(#"{}"#.utf8))
+    let nullAndObject = ClaudeLiveHTTPDiagnostic.classify(
+      statusCode: 200,
+      data: Data(#"{"five_hour":null,"seven_day":{}}"#.utf8)
+    )
+
+    #expect(missing.fiveHour == .missing)
+    #expect(missing.sevenDay == .missing)
+    #expect(nullAndObject.fiveHour == .null)
+    #expect(nullAndObject.sevenDay == .object(utilization: .absent, resetsAt: .absent))
+  }
+
+  @Test("live diagnostics classify utilization without retaining values")
+  func liveDiagnosticsClassifyUtilizationWithoutRetainingValues() {
+    let null = diagnosticForFiveHour(#"{"utilization":null}"#)
+    let zero = diagnosticForFiveHour(#"{"utilization":0}"#)
+    let positive = diagnosticForFiveHour(#"{"utilization":21.5}"#)
+    let outOfRange = diagnosticForFiveHour(#"{"utilization":101}"#)
+    let nonNumeric = diagnosticForFiveHour(#"{"utilization":"fixture-sensitive-value"}"#)
+
+    #expect(null.fiveHour == .object(utilization: .null, resetsAt: .absent))
+    #expect(zero.fiveHour == .object(utilization: .zero, resetsAt: .absent))
+    #expect(positive.fiveHour == .object(utilization: .positive, resetsAt: .absent))
+    #expect(outOfRange.fiveHour == .object(utilization: .outOfRange, resetsAt: .absent))
+    #expect(nonNumeric.fiveHour == .object(utilization: .nonNumeric, resetsAt: .absent))
+  }
+
+  @Test("live diagnostics classify reset timestamps without retaining values")
+  func liveDiagnosticsClassifyResetTimestampsWithoutRetainingValues() {
+    let null = diagnosticForFiveHour(#"{"resets_at":null}"#)
+    let fractional = diagnosticForFiveHour(
+      #"{"resets_at":"2026-09-04T12:30:00.000Z"}"#
+    )
+    let wholeSeconds = diagnosticForFiveHour(
+      #"{"resets_at":"2026-09-04T12:30:00Z"}"#
+    )
+    let unparseable = diagnosticForFiveHour(
+      #"{"resets_at":"fixture-sensitive-timestamp"}"#
+    )
+    let wrongType = diagnosticForFiveHour(#"{"resets_at":123}"#)
+
+    #expect(null.fiveHour == .object(utilization: .absent, resetsAt: .null))
+    #expect(fractional.fiveHour == .object(utilization: .absent, resetsAt: .parseable))
+    #expect(wholeSeconds.fiveHour == .object(utilization: .absent, resetsAt: .parseable))
+    #expect(unparseable.fiveHour == .object(utilization: .absent, resetsAt: .unparseable))
+    #expect(wrongType.fiveHour == .object(utilization: .absent, resetsAt: .wrongType))
+  }
+
+  @Test("diagnostic HTTP client records only allowlisted categories")
+  func diagnosticHTTPClientRecordsOnlyAllowlistedCategories() async throws {
+    let response = HTTPResponse(
+      data: Data(
+        #"{"five_hour":{"utilization":"fixture-secret-utilization","resets_at":"fixture-secret-reset","fixture-secret-key":"fixture-secret-body"},"seven_day":"fixture-secret-window"}"#
+          .utf8
+      ),
+      statusCode: 418,
+      headers: ["fixture-secret-header": "fixture-secret-header-value"],
+      finalURL: try #require(
+        URL(string: "https://api.anthropic.com/fixture-secret-account-path")
+      )
+    )
+    let recorder = ClaudeLiveHTTPDiagnosticRecorder()
+    let client = ClaudeLiveDiagnosticHTTPClient(
+      base: FixedHTTPClient(response: response),
+      recorder: recorder
+    )
+    var request = URLRequest(url: ClaudeProviderConfiguration.live.usageURL)
+    request.setValue("Bearer fixture-secret-token", forHTTPHeaderField: "Authorization")
+
+    _ = try await client.send(
+      request,
+      redirectPolicy: SameHostRedirectPolicy(origin: ClaudeProviderConfiguration.live.usageURL)
+    )
+
+    let summary = try #require(await recorder.summary())
+    #expect(
+      summary
+        == "http_status=418 five_hour=object(utilization=non_numeric,resets_at=unparseable) seven_day=wrong_type"
+    )
+    #expect(!summary.contains("fixture-secret"))
+    #expect(!summary.contains("Authorization"))
+    #expect(!summary.contains("anthropic.com"))
+  }
+
+  @Test("live diagnostics redact associated failure values")
+  func liveDiagnosticsRedactAssociatedFailureValues() {
+    #expect(safeProviderFailureCategory(.unsupportedPayload) == "unsupported_payload")
+    #expect(
+      safeProviderFailureCategory(.rateLimited(retryAfter: Date(timeIntervalSince1970: 42)))
+        == "rate_limited"
+    )
+    #expect(safeProviderFailureCategory(.processFailure(exitCode: 42)) == "process_failure")
+  }
+
   @Test(
     "live Claude usage works when explicitly enabled",
     .enabled(
@@ -194,18 +290,39 @@ extension ClaudeProviderTests {
   )
   func testLiveClaudeUsageWhenExplicitlyEnabled() async throws {
     let configuration = ClaudeProviderConfiguration.live
+    let diagnosticRecorder = ClaudeLiveHTTPDiagnosticRecorder()
     let provider = ClaudeQuotaProvider(
       credentialReader: KeychainClaudeCredentialReader(service: configuration.keychainService),
-      httpClient: URLSessionHTTPClient(),
+      httpClient: ClaudeLiveDiagnosticHTTPClient(
+        base: URLSessionHTTPClient(),
+        recorder: diagnosticRecorder
+      ),
       parser: ClaudeUsageParser(),
       clock: SystemClock(),
       configuration: configuration,
       timeoutSeconds: 5
     )
 
-    let snapshot = try await provider.fetchSnapshot()
-    #expect(!snapshot.windows.isEmpty)
-    #expect(snapshot.windows.values.allSatisfy { (0...100).contains($0.remaining.value) })
+    do {
+      let snapshot = try await provider.fetchSnapshot()
+      #expect(!snapshot.windows.isEmpty)
+      #expect(snapshot.windows.values.allSatisfy { (0...100).contains($0.remaining.value) })
+    } catch let failure as ProviderFailure {
+      let summary = await diagnosticRecorder.summary() ?? "http_status=not_observed"
+      Issue.record(
+        "Live Claude usage failed: failure=\(safeProviderFailureCategory(failure)) \(summary)"
+      )
+    } catch {
+      let summary = await diagnosticRecorder.summary() ?? "http_status=not_observed"
+      Issue.record("Live Claude usage failed: failure=unclassified_error \(summary)")
+    }
+  }
+
+  private func diagnosticForFiveHour(_ object: String) -> ClaudeLiveHTTPDiagnostic {
+    ClaudeLiveHTTPDiagnostic.classify(
+      statusCode: 200,
+      data: Data("{\"five_hour\":\(object)}".utf8)
+    )
   }
 }
 
@@ -255,5 +372,16 @@ private struct BlockingHTTPClient: HTTPClient {
   ) async throws -> HTTPResponse {
     try await Task.sleep(for: .seconds(60))
     throw HTTPClientError.transportFailure
+  }
+}
+
+private struct FixedHTTPClient: HTTPClient {
+  let response: HTTPResponse
+
+  func send(
+    _ request: URLRequest,
+    redirectPolicy: SameHostRedirectPolicy
+  ) async throws -> HTTPResponse {
+    response
   }
 }

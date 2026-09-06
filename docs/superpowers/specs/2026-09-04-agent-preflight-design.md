@@ -150,12 +150,14 @@ The Codex adapter uses the documented local app-server interface:
 
 1. Locate the user's `codex` executable using configured standard locations, the inherited process path, or a manual path override.
 2. Start `codex app-server --listen stdio://` as a child process.
-3. Complete the required JSON-RPC initialization handshake.
+3. Complete the verified initialization handshake: an `initialize` request, then an id-less `initialized` notification. Messages are line-delimited JSON objects that carry no `jsonrpc` field, and while awaiting a correlated response the reader skips id-less notifications and responses addressed to another id.
 4. Call `account/rateLimits/read`.
 5. Map the returned primary and secondary/multi-bucket windows into short and weekly windows based on their reported duration.
-6. Terminate the child process after the response or timeout.
+6. Terminate the child process after the response or timeout, escalating SIGTERM to SIGKILL when the child outlives its grace period.
 
 Codex manages its own OAuth credentials and refresh lifecycle. Agent Preflight never reads Codex tokens.
+
+Live compatibility finding: the app-server `RateLimitWindow` schema declares both `resetsAt` and `windowDurationMins` as nullable. A null `resetsAt` is kept as an unknown reset; the percentage is preserved, `Reset unavailable` is displayed, and the window is excluded from cross-provider recommendations. A window whose `windowDurationMins` is missing is skipped, because its position in the payload does not identify it as short or weekly. A non-null but non-positive `resetsAt` or `windowDurationMins` is an unsupported payload.
 
 ### Claude Code
 
@@ -175,6 +177,8 @@ Security constraints:
 - The application does not ask for a password, session cookie, or manually pasted bearer token.
 - A denied Keychain request remains denied until another explicit user action.
 - A 401 response produces re-authentication guidance and does not trigger a hidden login flow.
+
+Live compatibility finding: an idle window can return a valid `utilization` with a null `resets_at`. A null reset is kept as an unknown reset; the percentage is preserved, `Reset unavailable` is displayed, and the window is excluded from cross-provider recommendations. A non-null malformed reset is an unsupported payload.
 
 This endpoint and the Claude credential shape are not a public compatibility contract. They are the primary maintenance risk and are isolated behind `ClaudeQuotaProvider` and fixture-tested parsers.
 
@@ -339,7 +343,7 @@ After validation:
 
 ## References
 
-- OpenAI Codex app-server documentation: <https://learn.chatgpt.com/docs/app-server>
+- OpenAI Codex app-server documentation: <https://developers.openai.com/codex/app-server>
 - Claude Code status-line quota fields: <https://code.claude.com/docs/en/statusline>
 - Claude Code usage commands: <https://support.claude.com/en/articles/14553413-claude-code-cheatsheet>
 - Competitive reference, CodexBar: <https://github.com/steipete/CodexBar>

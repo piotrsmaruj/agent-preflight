@@ -28,6 +28,20 @@ If `swift test` fails to find the testing framework, see
 
 Agent Preflight appears only in the menu bar. Open its panel to request fresh quota. The first Claude refresh can show a macOS Keychain prompt for the existing `Claude Code-credentials` item.
 
+## First run
+
+### The Keychain prompt
+
+Opening the panel for the first time reads the existing `Claude Code-credentials` Keychain item, and macOS shows an access prompt naming `AgentPreflight`. Choose **Always Allow**. A one-time **Allow** grants that single read only, so the prompt returns on every refresh that is not suppressed by the 30-second cooldown.
+
+The prompt also returns after every rebuild or repackage: each build is ad-hoc signed with a new identity, so macOS treats it as a different application and asks again. That is expected on a rebuild and is not the repeated-prompt behaviour caused by choosing **Allow**.
+
+### Finding the Codex executable
+
+An app launched from Finder inherits launchd's `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), not the `PATH` exported by your shell. Agent Preflight therefore finds `codex` automatically only at `/opt/homebrew/bin/codex` or `/usr/local/bin/codex`. For any other location, set the absolute path in Settings.
+
+Prefer a native `codex` binary; the Homebrew cask installs one. An npm shim starts with `#!/usr/bin/env node` and additionally needs `node` reachable from the app's `PATH`, which launchd's `PATH` does not provide; it fails with "Codex app-server exited before returning usage".
+
 ## Authentication and privacy
 
 Codex remains responsible for its credentials through app-server. Agent Preflight asks macOS Keychain for the existing `Claude Code-credentials` item only during a user-initiated refresh. Tokens are held only for the request lifetime and are never cached or logged. See PRIVACY.md.
@@ -75,7 +89,7 @@ Claude's OAuth usage endpoint and foreign Keychain payload are internal contract
 
 | Displayed message | Action |
 |---|---|
-| Codex executable not found. Set its path in Settings. | Set the absolute path in Settings or make `codex` available in PATH. |
+| Codex executable not found. Set its path in Settings. | The app searches only `/opt/homebrew/bin/codex` and `/usr/local/bin/codex`; for any other location set the absolute path in Settings. |
 | Run `codex login`, then refresh. / Run `claude login`, then refresh. | Sign in to the named provider CLI, then refresh. |
 | Allow access to Claude Code credentials in Keychain, then refresh. | Refresh again and approve access to `Claude Code-credentials`. |
 | Claude credentials are unsupported. Run `claude logout && claude login`. | Re-create the Claude credential, then refresh. |
@@ -83,7 +97,7 @@ Claude's OAuth usage endpoint and foreign Keychain payload are internal contract
 | The provider rejected the current login. Sign in again, then refresh. | Sign in with the provider CLI again, then refresh. |
 | Usage lookup is rate limited. Wait a moment, then refresh. | Wait a few minutes, then refresh manually. |
 | This provider version returned an unsupported usage format. | Check for a newer Agent Preflight release and report only app/provider versions plus the displayed error category. |
-| Codex app-server exited before returning usage. | Confirm `codex app-server --listen stdio://` starts from your shell, then refresh. |
+| Codex app-server exited before returning usage. | Confirm `codex app-server --listen stdio://` starts from your shell, then refresh. The app runs with launchd's `PATH`, not the shell's, so an npm shim that needs `node` on `PATH` fails here even when the shell command succeeds; point Settings at a native `codex` binary. |
 | Codex app-server returned an invalid protocol response. | Update the Codex CLI, then refresh. |
 | Claude usage endpoint returned an unexpected response. Refresh to try again. | Refresh; if it persists, check for a newer Agent Preflight release. |
 | Usage could not be reached. Check the network, then refresh. | Check connectivity and refresh. |

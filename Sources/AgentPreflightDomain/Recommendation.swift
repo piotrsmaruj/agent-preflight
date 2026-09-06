@@ -21,6 +21,7 @@ public struct ConstraintFailure: Equatable, Sendable {
   public let remaining: Double
   public let required: Double
   public let resetsAt: Date
+  public let scopeLabel: String?
 }
 
 public struct Recommendation: Equatable, Sendable {

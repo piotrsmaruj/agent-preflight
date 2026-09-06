@@ -36,7 +36,8 @@ public struct RecommendationEngine: Sendable {
   ) -> Assessment? {
     guard let snapshot = snapshots[provider],
       let short = snapshot.window(.short, validAt: now),
-      let weekly = snapshot.window(.weekly, validAt: now),
+      let allModelsWeekly = snapshot.window(.weekly, validAt: now),
+      let weekly = bindingWeekly(in: snapshot, allModels: allModelsWeekly, now: now),
       let shortReset = short.resetsAt,
       let weeklyReset = weekly.resetsAt
     else { return nil }
@@ -52,6 +53,21 @@ public struct RecommendationEngine: Sendable {
     return Assessment(provider: provider, margin: margin, failures: failures)
   }
 
+  /// Returns the weekly window the task must fit into: the more constraining of the all-models
+  /// week and a model-scoped week, or nil when a reported scoped week is unknown or expired.
+  ///
+  /// A present but unusable scoped week is as disqualifying as a missing required window, because
+  /// the provider may already meter the task against a limit the app cannot see.
+  private func bindingWeekly(
+    in snapshot: QuotaSnapshot,
+    allModels: QuotaWindow,
+    now: Date
+  ) -> QuotaWindow? {
+    guard snapshot.windows[.modelWeekly] != nil else { return allModels }
+    guard let scoped = snapshot.window(.modelWeekly, validAt: now) else { return nil }
+    return scoped.remaining.value < allModels.remaining.value ? scoped : allModels
+  }
+
   private func failure(
     _ provider: ProviderIdentifier,
     window: QuotaWindow,
@@ -64,7 +80,8 @@ public struct RecommendationEngine: Sendable {
       window: window.kind,
       remaining: window.remaining.value,
       required: required,
-      resetsAt: resetsAt
+      resetsAt: resetsAt,
+      scopeLabel: window.scopeLabel
     )
   }
 

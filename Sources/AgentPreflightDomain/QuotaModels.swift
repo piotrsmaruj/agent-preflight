@@ -8,6 +8,13 @@ public enum ProviderIdentifier: String, CaseIterable, Codable, Sendable {
 public enum QuotaWindowKind: String, CaseIterable, Codable, Sendable {
   case short
   case weekly
+  case modelWeekly
+
+  /// The windows a provider must report before it can take part in a recommendation.
+  ///
+  /// `modelWeekly` is deliberately absent: only Claude Code exposes a model-scoped week, so a
+  /// snapshot without one is complete rather than partial.
+  public static let requiredForRecommendation: [QuotaWindowKind] = [.short, .weekly]
 }
 
 public enum QuotaModelError: Error, Equatable, Sendable {
@@ -50,11 +57,20 @@ public struct QuotaWindow: Codable, Equatable, Sendable {
   public let kind: QuotaWindowKind
   public let remaining: RemainingPercentage
   public let resetsAt: Date?
+  /// Names what the window is scoped to, such as the model of a model-scoped week; nil when the
+  /// window covers everything the provider meters.
+  public let scopeLabel: String?
 
-  public init(kind: QuotaWindowKind, remaining: RemainingPercentage, resetsAt: Date?) {
+  public init(
+    kind: QuotaWindowKind,
+    remaining: RemainingPercentage,
+    resetsAt: Date?,
+    scopeLabel: String? = nil
+  ) {
     self.kind = kind
     self.remaining = remaining
     self.resetsAt = resetsAt
+    self.scopeLabel = scopeLabel
   }
 }
 

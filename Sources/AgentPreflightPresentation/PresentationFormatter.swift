@@ -15,10 +15,17 @@ public struct PresentationFormatter: Sendable {
     provider == .codex ? "Codex" : "Claude Code"
   }
 
-  public func row(provider: ProviderIdentifier, window: QuotaWindow, now: Date) -> QuotaRowModel {
+  /// Renders one window; `weeklyTitle` lets a card that also shows a model-scoped week say which
+  /// weekly window this row is, without the formatter knowing the rest of the card.
+  public func row(
+    provider: ProviderIdentifier,
+    window: QuotaWindow,
+    now: Date,
+    weeklyTitle: String = "Weekly"
+  ) -> QuotaRowModel {
     let percent = Int(window.remaining.value.rounded())
     let isExpired = isExpired(window.resetsAt, now: now)
-    let windowTitle = window.kind == .short ? "Short window" : "Weekly"
+    let windowTitle = title(window, weeklyTitle: weeklyTitle)
     let remainingText = isExpired ? "Remaining unknown" : "\(percent)% remaining"
     let reset = resetText(window.resetsAt, now: now)
     let state = stateText(percent: percent, reset: window.resetsAt, now: now)
@@ -51,8 +58,23 @@ public struct PresentationFormatter: Sendable {
   }
 
   public func failureLabel(_ failure: ConstraintFailure) -> String {
-    let window = failure.window == .short ? "short" : "weekly"
-    return "\(providerTitle(failure.provider)) \(window)"
+    "\(providerTitle(failure.provider)) \(windowLabel(failure))"
+  }
+
+  private func title(_ window: QuotaWindow, weeklyTitle: String) -> String {
+    switch window.kind {
+    case .short: "Short window"
+    case .weekly: weeklyTitle
+    case .modelWeekly: "Weekly · \(window.scopeLabel ?? "model")"
+    }
+  }
+
+  private func windowLabel(_ failure: ConstraintFailure) -> String {
+    switch failure.window {
+    case .short: "short"
+    case .weekly: "weekly"
+    case .modelWeekly: "weekly (\(failure.scopeLabel ?? "model"))"
+    }
   }
 
   private func stateText(percent: Int, reset: Date?, now: Date) -> String {

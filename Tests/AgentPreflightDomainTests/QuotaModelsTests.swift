@@ -56,6 +56,41 @@ struct QuotaModelsTests {
     #expect(decoded.resetsAt == nil)
   }
 
+  @Test("a scope label survives a Codable round trip")
+  func scopeLabelSurvivesCodableRoundTrip() throws {
+    let window = QuotaWindow(
+      kind: .modelWeekly,
+      remaining: try RemainingPercentage(remaining: 86),
+      resetsAt: Date(timeIntervalSince1970: 2_000_000_000),
+      scopeLabel: "Fable"
+    )
+
+    let decoded = try JSONDecoder().decode(
+      QuotaWindow.self,
+      from: try JSONEncoder().encode(window)
+    )
+
+    #expect(decoded == window)
+    #expect(decoded.scopeLabel == "Fable")
+  }
+
+  @Test("a window persisted before scope labels existed still decodes")
+  func windowPersistedBeforeScopeLabelsExistedStillDecodes() throws {
+    let legacyWindow = Data(#"{"kind":"weekly","remaining":{"value":40}}"#.utf8)
+
+    let decoded = try JSONDecoder().decode(QuotaWindow.self, from: legacyWindow)
+
+    #expect(decoded.kind == .weekly)
+    #expect(decoded.remaining.value == 40)
+    #expect(decoded.resetsAt == nil)
+    #expect(decoded.scopeLabel == nil)
+  }
+
+  @Test("only the short and all-models weekly windows are required for a recommendation")
+  func onlyShortAndAllModelsWeeklyWindowsAreRequiredForRecommendation() {
+    #expect(QuotaWindowKind.requiredForRecommendation == [.short, .weekly])
+  }
+
   @Test("snapshot validity excludes unknown and expired resets")
   func snapshotValidityExcludesUnknownAndExpiredResets() throws {
     let now = Date(timeIntervalSince1970: 2_000_000_000)

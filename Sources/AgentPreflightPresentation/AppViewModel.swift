@@ -88,10 +88,11 @@ public final class AppViewModel: ObservableObject {
     now: Date
   ) -> ProviderCardModel {
     let windows = status?.snapshot.map { Array($0.windows.values) } ?? []
+    let weeklyTitle = weeklyTitle(for: windows)
     let rows =
       windows
       .sorted { sortIndex($0.kind) < sortIndex($1.kind) }
-      .map { formatter.row(provider: provider, window: $0, now: now) }
+      .map { formatter.row(provider: provider, window: $0, now: now, weeklyTitle: weeklyTitle) }
     return ProviderCardModel(
       provider: provider,
       title: formatter.providerTitle(provider),
@@ -101,9 +102,17 @@ public final class AppViewModel: ObservableObject {
     )
   }
 
+  /// Names the all-models week only on a card that also shows a model-scoped week, so a provider
+  /// with a single weekly window keeps the shorter, unambiguous title.
+  private func weeklyTitle(for windows: [QuotaWindow]) -> String {
+    windows.contains { $0.kind == .modelWeekly } ? "Weekly · all models" : "Weekly"
+  }
+
   private func cardFreshnessText(status: ProviderStatus?, windows: [QuotaWindow]) -> String {
     let base = freshnessText(status?.freshness ?? .unavailable)
-    let isComplete = QuotaWindowKind.allCases.allSatisfy { status?.snapshot?.windows[$0] != nil }
+    let isComplete = QuotaWindowKind.requiredForRecommendation.allSatisfy {
+      status?.snapshot?.windows[$0] != nil
+    }
     return windows.isEmpty || isComplete ? base : "\(base) · Incomplete"
   }
 
@@ -153,6 +162,10 @@ public final class AppViewModel: ObservableObject {
   }
 
   private func sortIndex(_ kind: QuotaWindowKind) -> Int {
-    kind == .short ? 0 : 1
+    switch kind {
+    case .short: 0
+    case .weekly: 1
+    case .modelWeekly: 2
+    }
   }
 }

@@ -274,6 +274,107 @@ extension ClaudeProviderTests {
 }
 
 extension ClaudeProviderTests {
+  @Test("parser reads the model-scoped week from the limits array")
+  func parserReadsModelScopedWeekFromLimitsArray() throws {
+    let snapshot = try ClaudeUsageParser().parse(
+      loadFixture("claude-limits"),
+      fetchedAt: Date(timeIntervalSince1970: 1_788_505_200)
+    )
+
+    #expect(snapshot.windows.count == 3)
+    #expect(snapshot.windows[.short]?.remaining.value == 46)
+    #expect(snapshot.windows[.weekly]?.remaining.value == 86)
+    #expect(snapshot.windows[.weekly]?.scopeLabel == nil)
+
+    let scoped = try #require(snapshot.windows[.modelWeekly])
+    let scopedReset = try #require(scoped.resetsAt)
+    let weeklyReset = try #require(snapshot.windows[.weekly]?.resetsAt)
+    #expect(scoped.remaining.value == 86)
+    #expect(scoped.scopeLabel == "Fable")
+    #expect(scopedReset > weeklyReset)
+  }
+
+  @Test("parser reports no model-scoped week when the limits array is absent")
+  func parserReportsNoModelScopedWeekWhenLimitsArrayIsAbsent() throws {
+    let snapshot = try ClaudeUsageParser().parse(
+      loadFixture("claude-success"),
+      fetchedAt: Date(timeIntervalSince1970: 1_788_505_200)
+    )
+
+    #expect(snapshot.windows[.modelWeekly] == nil)
+    #expect(snapshot.windows.count == 2)
+  }
+
+  @Test("parser keeps the most consumed of several model-scoped weeks")
+  func parserKeepsMostConsumedOfSeveralModelScopedWeeks() throws {
+    let payload = Data(
+      #"{"limits":[{"kind":"weekly_scoped","percent":30,"resets_at":"2026-09-08T07:00:00Z","scope":{"model":{"display_name":"Sonnet"}}},{"kind":"weekly_scoped","percent":60,"resets_at":"2026-09-08T07:00:00Z","scope":{"model":{"display_name":"Fable"}}}]}"#
+        .utf8
+    )
+
+    let snapshot = try ClaudeUsageParser().parse(payload, fetchedAt: Date())
+
+    #expect(snapshot.windows[.modelWeekly]?.remaining.value == 40)
+    #expect(snapshot.windows[.modelWeekly]?.scopeLabel == "Fable")
+  }
+
+  @Test("parser names an unlabelled model-scoped week generically")
+  func parserNamesUnlabelledModelScopedWeekGenerically() throws {
+    let payload = Data(
+      #"{"limits":[{"kind":"weekly_scoped","percent":20,"resets_at":"2026-09-08T07:00:00Z"}]}"#
+        .utf8
+    )
+
+    let snapshot = try ClaudeUsageParser().parse(payload, fetchedAt: Date())
+
+    #expect(snapshot.windows[.modelWeekly]?.scopeLabel == "Model")
+  }
+
+  @Test("parser rejects a malformed model-scoped reset timestamp")
+  func parserRejectsMalformedModelScopedResetTimestamp() {
+    let payload = Data(
+      #"{"five_hour":{"utilization":10,"resets_at":"2026-09-06T21:00:00Z"},"limits":[{"kind":"weekly_scoped","percent":20,"resets_at":"not-a-date"}]}"#
+        .utf8
+    )
+
+    #expect(throws: ProviderFailure.unsupportedPayload) {
+      try ClaudeUsageParser().parse(payload, fetchedAt: Date())
+    }
+  }
+
+  @Test("parser rejects an out-of-range model-scoped percentage")
+  func parserRejectsOutOfRangeModelScopedPercentage() {
+    let payload = Data(
+      #"{"five_hour":{"utilization":10,"resets_at":"2026-09-06T21:00:00Z"},"limits":[{"kind":"weekly_scoped","percent":101,"resets_at":"2026-09-08T07:00:00Z"}]}"#
+        .utf8
+    )
+
+    #expect(throws: ProviderFailure.unsupportedPayload) {
+      try ClaudeUsageParser().parse(payload, fetchedAt: Date())
+    }
+  }
+
+  @Test("provider maps a response carrying a model-scoped week")
+  func providerMapsResponseCarryingModelScopedWeek() async throws {
+    let transport = HTTPClientSpy(statusCode: 200, data: try loadFixture("claude-limits"))
+    let provider = ClaudeQuotaProvider(
+      credentialReader: CredentialReaderStub(token: "fixture-token-never-log"),
+      httpClient: transport,
+      parser: ClaudeUsageParser(),
+      clock: FixedClock(now: Date(timeIntervalSince1970: 1_788_505_200)),
+      configuration: .live,
+      timeoutSeconds: 5
+    )
+
+    let snapshot = try await provider.fetchSnapshot()
+
+    #expect(snapshot.windows[.short]?.remaining.value == 46)
+    #expect(snapshot.windows[.weekly]?.remaining.value == 86)
+    #expect(snapshot.windows[.modelWeekly]?.scopeLabel == "Fable")
+  }
+}
+
+extension ClaudeProviderTests {
   @Test("live diagnostics distinguish missing, null, and object windows")
   func liveDiagnosticsDistinguishMissingNullAndObjectWindows() {
     let missing = ClaudeLiveHTTPDiagnostic.classify(statusCode: 200, data: Data(#"{}"#.utf8))

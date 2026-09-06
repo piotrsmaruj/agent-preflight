@@ -124,6 +124,41 @@ struct AppViewModelTests {
     #expect(model.recommendation.detail.contains("resets in 15m"))
   }
 
+  @Test("the Claude card separates the all-models week from the model-scoped week")
+  func claudeCardSeparatesAllModelsWeekFromModelScopedWeek() async throws {
+    let model = AppViewModel(
+      refreshUseCase: RefreshUseCaseStub(result: try modelScopedWeeklyResult(scopedRemaining: 30)),
+      recommendationEngine: RecommendationEngine(),
+      clock: FixedPresentationClock(now: referenceDate)
+    )
+
+    await model.panelOpened()
+
+    let claude = try #require(model.providerCards.first { $0.provider == .claudeCode })
+    let codex = try #require(model.providerCards.first { $0.provider == .codex })
+    #expect(claude.rows.map(\.title) == ["Short window", "Weekly · all models", "Weekly · Fable"])
+    #expect(codex.rows.map(\.title) == ["Short window", "Weekly"])
+    #expect(model.providerCards.allSatisfy { !$0.freshnessText.contains("Incomplete") })
+    #expect(claude.rows.last?.accessibilityLabel.contains("Weekly · Fable") == true)
+  }
+
+  @Test("no safe choice names the model-scoped week that binds the weekly constraint")
+  func noSafeChoiceNamesModelScopedWeekThatBindsWeeklyConstraint() async throws {
+    let model = AppViewModel(
+      refreshUseCase: RefreshUseCaseStub(result: try modelScopedWeeklyResult(scopedRemaining: 5)),
+      recommendationEngine: RecommendationEngine(),
+      clock: FixedPresentationClock(now: referenceDate)
+    )
+
+    await model.panelOpened()
+
+    #expect(model.recommendation.title == "No safe choice")
+    #expect(model.recommendation.detail.contains("Codex short"))
+    #expect(model.recommendation.detail.contains("Claude Code weekly (Fable)"))
+    #expect(!model.recommendation.detail.contains("Claude Code weekly;"))
+    #expect(model.recommendation.detail.contains("resets in 15m"))
+  }
+
   @Test("a window with an unknown reset keeps its percentage and says so")
   func windowWithUnknownResetKeepsPercentageAndReportsMissingReset() throws {
     let window = QuotaWindow(kind: .short, remaining: try .init(remaining: 100), resetsAt: nil)
@@ -273,6 +308,59 @@ private func unknownShortResetResult() throws -> RefreshResult {
         kind: .weekly,
         remaining: .init(remaining: 50),
         resetsAt: referenceDate.addingTimeInterval(86_400)
+      ),
+    ],
+    fetchedAt: referenceDate
+  )
+  return RefreshResult(
+    statuses: [
+      .codex: ProviderStatus(provider: .codex, snapshot: codex, freshness: .current, failure: nil),
+      .claudeCode: ProviderStatus(
+        provider: .claudeCode,
+        snapshot: claude,
+        freshness: .current,
+        failure: nil
+      ),
+    ],
+    completedAt: referenceDate
+  )
+}
+
+private func modelScopedWeeklyResult(scopedRemaining: Double) throws -> RefreshResult {
+  let codex = try QuotaSnapshot(
+    provider: .codex,
+    windows: [
+      QuotaWindow(
+        kind: .short,
+        remaining: .init(remaining: 20),
+        resetsAt: referenceDate.addingTimeInterval(900)
+      ),
+      QuotaWindow(
+        kind: .weekly,
+        remaining: .init(remaining: 50),
+        resetsAt: referenceDate.addingTimeInterval(86_400)
+      ),
+    ],
+    fetchedAt: referenceDate
+  )
+  let claude = try QuotaSnapshot(
+    provider: .claudeCode,
+    windows: [
+      QuotaWindow(
+        kind: .short,
+        remaining: .init(remaining: 90),
+        resetsAt: referenceDate.addingTimeInterval(3_600)
+      ),
+      QuotaWindow(
+        kind: .weekly,
+        remaining: .init(remaining: 50),
+        resetsAt: referenceDate.addingTimeInterval(86_400)
+      ),
+      QuotaWindow(
+        kind: .modelWeekly,
+        remaining: .init(remaining: scopedRemaining),
+        resetsAt: referenceDate.addingTimeInterval(86_400),
+        scopeLabel: "Fable"
       ),
     ],
     fetchedAt: referenceDate

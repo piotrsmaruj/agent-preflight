@@ -63,6 +63,61 @@ struct JSONQuotaCacheTests {
     #expect(loaded.windows[.short]?.resetsAt == nil)
   }
 
+  @Test("round trip preserves a model-scoped weekly window with its scope label")
+  func roundTripPreservesModelScopedWeeklyWindowWithScopeLabel() async throws {
+    let directory = Self.temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let cache = JSONQuotaCache(directory: directory)
+    let fetchedAt = Date(timeIntervalSince1970: 1_788_505_200)
+    let snapshot = try QuotaSnapshot(
+      provider: .claudeCode,
+      windows: [
+        QuotaWindow(
+          kind: .short,
+          remaining: RemainingPercentage(remaining: 46),
+          resetsAt: fetchedAt.addingTimeInterval(3_600)
+        ),
+        QuotaWindow(
+          kind: .weekly,
+          remaining: RemainingPercentage(remaining: 86),
+          resetsAt: fetchedAt.addingTimeInterval(86_400)
+        ),
+        QuotaWindow(
+          kind: .modelWeekly,
+          remaining: RemainingPercentage(remaining: 86),
+          resetsAt: fetchedAt.addingTimeInterval(86_400),
+          scopeLabel: "Fable"
+        ),
+      ],
+      fetchedAt: fetchedAt
+    )
+
+    try await cache.save([.claudeCode: snapshot])
+    let loaded = try #require(try await cache.load()[.claudeCode])
+
+    #expect(loaded == snapshot)
+    #expect(loaded.windows[.modelWeekly]?.scopeLabel == "Fable")
+  }
+
+  @Test("load accepts a cache file written before scope labels existed")
+  func loadAcceptsCacheFileWrittenBeforeScopeLabelsExisted() async throws {
+    let directory = Self.temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let legacyDocument = Data(
+      #"{"version":1,"snapshots":[{"provider":"claudeCode","fetchedAt":810000000,"windows":[{"kind":"short","remaining":{"value":46},"resetsAt":810003600},{"kind":"weekly","remaining":{"value":86}}]}]}"#
+        .utf8
+    )
+    try legacyDocument.write(to: directory.appendingPathComponent(JSONQuotaCache.fileName))
+
+    let loaded = try #require(try await JSONQuotaCache(directory: directory).load()[.claudeCode])
+
+    #expect(loaded.windows[.short]?.remaining.value == 46)
+    #expect(loaded.windows[.short]?.scopeLabel == nil)
+    #expect(loaded.windows[.weekly]?.resetsAt == nil)
+    #expect(loaded.windows[.weekly]?.scopeLabel == nil)
+  }
+
   @Test("load returns no snapshots when the cache file is absent")
   func loadReturnsNoSnapshotsWhenCacheFileIsAbsent() async throws {
     let directory = Self.temporaryDirectory()

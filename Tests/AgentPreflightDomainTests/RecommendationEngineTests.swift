@@ -188,6 +188,75 @@ struct RecommendationEngineTests {
     #expect(result.reason == .incompleteOrStaleData)
   }
 
+  @Test("a tighter model-scoped week becomes the reported weekly constraint")
+  func tighterModelScopedWeekBecomesReportedWeeklyConstraint() throws {
+    let claude = try scopedSnapshot(.claudeCode, short: 90, weekly: 50, scoped: 5)
+
+    let result = RecommendationEngine().recommend(
+      taskSize: .medium,
+      snapshots: [.codex: try snapshot(.codex, short: 20, weekly: 50), .claudeCode: claude],
+      staleProviders: [],
+      now: now
+    )
+
+    #expect(result.decision == .noSafeChoice)
+    let weeklyFailures = result.failures.filter { $0.provider == .claudeCode }
+    #expect(weeklyFailures.count == 1)
+    #expect(weeklyFailures.first?.window == .modelWeekly)
+    #expect(weeklyFailures.first?.scopeLabel == "Fable")
+    #expect(weeklyFailures.first?.remaining == 5)
+    #expect(weeklyFailures.first?.required == 10)
+  }
+
+  @Test("a tighter model-scoped week lowers the safety margin")
+  func tighterModelScopedWeekLowersSafetyMargin() throws {
+    let claude = try scopedSnapshot(.claudeCode, short: 30, weekly: 50, scoped: 7.5)
+
+    let result = RecommendationEngine().recommend(
+      taskSize: .small,
+      snapshots: [.codex: try snapshot(.codex, short: 30, weekly: 25), .claudeCode: claude],
+      staleProviders: [],
+      now: now
+    )
+
+    #expect(result.decision == .provider(.codex))
+    #expect(result.reason == .largerMargin(.codex))
+  }
+
+  @Test("a looser model-scoped week leaves the all-models week binding")
+  func looserModelScopedWeekLeavesAllModelsWeekBinding() throws {
+    let claude = try scopedSnapshot(.claudeCode, short: 90, weekly: 5, scoped: 50)
+
+    let result = RecommendationEngine().recommend(
+      taskSize: .medium,
+      snapshots: [.codex: try snapshot(.codex, short: 20, weekly: 50), .claudeCode: claude],
+      staleProviders: [],
+      now: now
+    )
+
+    #expect(result.decision == .noSafeChoice)
+    let weeklyFailures = result.failures.filter { $0.provider == .claudeCode }
+    #expect(weeklyFailures.count == 1)
+    #expect(weeklyFailures.first?.window == .weekly)
+    #expect(weeklyFailures.first?.scopeLabel == nil)
+  }
+
+  @Test("a model-scoped week without a known reset makes the recommendation unavailable")
+  func modelScopedWeekWithoutKnownResetMakesRecommendationUnavailable() throws {
+    let claude = try scopedSnapshot(
+      .claudeCode, short: 90, weekly: 90, scoped: 90, scopedReset: nil)
+
+    let result = RecommendationEngine().recommend(
+      taskSize: .small,
+      snapshots: [.codex: try snapshot(.codex, short: 90, weekly: 90), .claudeCode: claude],
+      staleProviders: [],
+      now: now
+    )
+
+    #expect(result.decision == .unavailable)
+    #expect(result.reason == .incompleteOrStaleData)
+  }
+
   private func snapshot(
     _ provider: ProviderIdentifier,
     short: Double,
@@ -207,6 +276,38 @@ struct RecommendationEngineTests {
           kind: .weekly,
           remaining: try RemainingPercentage(remaining: weekly),
           resetsAt: now.addingTimeInterval(weeklyReset)
+        ),
+      ],
+      fetchedAt: now
+    )
+  }
+
+  private func scopedSnapshot(
+    _ provider: ProviderIdentifier,
+    short: Double,
+    weekly: Double,
+    scoped: Double,
+    scopeLabel: String = "Fable",
+    scopedReset: TimeInterval? = 86_400
+  ) throws -> QuotaSnapshot {
+    try QuotaSnapshot(
+      provider: provider,
+      windows: [
+        QuotaWindow(
+          kind: .short,
+          remaining: try RemainingPercentage(remaining: short),
+          resetsAt: now.addingTimeInterval(3_600)
+        ),
+        QuotaWindow(
+          kind: .weekly,
+          remaining: try RemainingPercentage(remaining: weekly),
+          resetsAt: now.addingTimeInterval(86_400)
+        ),
+        QuotaWindow(
+          kind: .modelWeekly,
+          remaining: try RemainingPercentage(remaining: scoped),
+          resetsAt: scopedReset.map { now.addingTimeInterval($0) },
+          scopeLabel: scopeLabel
         ),
       ],
       fetchedAt: now

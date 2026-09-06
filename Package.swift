@@ -25,6 +25,10 @@ let package = Package(
       dependencies: ["AgentPreflightDomain"]
     ),
     .testTarget(
+      name: "AgentPreflightApplicationTests",
+      dependencies: ["AgentPreflightDomain", "AgentPreflightApplication"]
+    ),
+    .testTarget(
       name: "AgentPreflightInfrastructureTests",
       dependencies: [
         "AgentPreflightDomain", "AgentPreflightApplication", "AgentPreflightInfrastructure",

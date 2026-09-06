@@ -219,6 +219,38 @@ extension CodexProviderTests {
     }
   }
 
+  @Test("app server maps an authentication RPC error to unauthenticated")
+  func appServerMapsAuthenticationRPCErrorToUnauthenticated() async throws {
+    let session = JSONLineSessionStub(incoming: [
+      Data(#"{"id":0,"result":{"userAgent":"codex"}}"#.utf8),
+      try fixture("codex-unauthenticated"),
+    ])
+    let client = CodexAppServerClient(
+      launcher: ProcessLauncherStub(session: session),
+      timeoutSeconds: 5
+    )
+
+    await #expect(throws: ProviderFailure.unauthenticated) {
+      try await client.readRateLimits(executableURL: URL(fileURLWithPath: "/fixture/codex"))
+    }
+    #expect(await session.wasTerminated)
+  }
+
+  @Test("app server keeps an unrelated RPC error message a protocol failure")
+  func appServerKeepsUnrelatedRPCErrorMessageProtocolFailure() async throws {
+    let client = CodexAppServerClient(
+      launcher: ProcessLauncherStub(
+        session: JSONLineSessionStub(incoming: [
+          Data(#"{"id":0,"error":{"code":-32600,"message":"rate limit backend unavailable"}}"#.utf8)
+        ])),
+      timeoutSeconds: 5
+    )
+
+    await #expect(throws: ProviderFailure.protocolFailure) {
+      try await client.readRateLimits(executableURL: URL(fileURLWithPath: "/fixture/codex"))
+    }
+  }
+
   @Test("parser rejects out-of-range usage")
   func parserRejectsOutOfRangeUsage() {
     let payload = Data(

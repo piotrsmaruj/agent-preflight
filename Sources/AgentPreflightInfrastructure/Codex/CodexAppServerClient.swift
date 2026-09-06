@@ -73,7 +73,7 @@ public struct CodexAppServerClient: Sendable {
         throw ProviderFailure.protocolFailure
       }
       guard header.id == id else { continue }
-      guard header.error == nil else { throw ProviderFailure.protocolFailure }
+      if let rpcError = header.error { throw Self.failure(for: rpcError) }
       return line
     }
     throw ProviderFailure.processFailure(exitCode: await session.waitForExit())
@@ -86,6 +86,19 @@ public struct CodexAppServerClient: Sendable {
     return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
   }
 
+  /// codex-cli reports a missing login as a generic invalid-request code, so only the message
+  /// separates it from a real protocol fault. The message itself is child-process output and is
+  /// deliberately never carried into the thrown failure.
+  private static let authenticationMessageKeywords = [
+    "authentication", "authenticate", "login", "logged in", "not logged",
+  ]
+
+  private static func failure(for rpcError: RPCError) -> ProviderFailure {
+    let message = rpcError.message?.lowercased() ?? ""
+    let isAuthentication = authenticationMessageKeywords.contains { message.contains($0) }
+    return isAuthentication ? .unauthenticated : .protocolFailure
+  }
+
   private struct ResponseHeader: Decodable {
     let id: Int?
     let error: RPCError?
@@ -93,5 +106,6 @@ public struct CodexAppServerClient: Sendable {
 
   private struct RPCError: Decodable {
     let code: Int
+    let message: String?
   }
 }

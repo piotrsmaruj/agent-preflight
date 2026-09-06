@@ -9,6 +9,7 @@ let package = Package(
     .library(name: "AgentPreflightApplication", targets: ["AgentPreflightApplication"]),
     .library(name: "AgentPreflightInfrastructure", targets: ["AgentPreflightInfrastructure"]),
     .library(name: "AgentPreflightPresentation", targets: ["AgentPreflightPresentation"]),
+    .executable(name: "AgentPreflight", targets: ["AgentPreflightApp"]),
   ],
   targets: [
     .target(name: "AgentPreflightDomain"),
@@ -24,6 +25,15 @@ let package = Package(
     .target(
       name: "AgentPreflightPresentation",
       dependencies: ["AgentPreflightDomain", "AgentPreflightApplication"]
+    ),
+    .executableTarget(
+      name: "AgentPreflightApp",
+      dependencies: [
+        "AgentPreflightDomain",
+        "AgentPreflightApplication",
+        "AgentPreflightInfrastructure",
+        "AgentPreflightPresentation",
+      ]
     ),
     .testTarget(
       name: "AgentPreflightDomainTests",

@@ -51,6 +51,15 @@ swift test
 swift build -c release
 ```
 
+Formatting is enforced with the same command CI runs; `--strict` turns findings into a non-zero exit
+status instead of a warning:
+
+```bash
+swift format lint --strict --recursive Package.swift Sources Tests
+```
+
+The `.swift-format` file at the repository root pins the formatter configuration explicitly, so a different swift-format build formats this repository identically.
+
 The following opt-in smoke tests access the currently signed-in provider accounts. They never run in CI and must not be attached to public bug reports with verbose network logging:
 
 ```bash

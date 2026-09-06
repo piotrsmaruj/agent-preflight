@@ -81,6 +81,32 @@ struct RecommendationEngineTests {
     #expect(result.reason == .largerMargin(.claudeCode))
   }
 
+  /// Pins the `>=` boundary itself: every value here is exactly representable in binary
+  /// floating point, so the margin difference equals the tolerance with no rounding slack
+  /// and the case fails the moment the comparison becomes a strict `>`.
+  @Test("a margin difference of exactly the tolerance chooses the larger margin")
+  func differenceOfExactlyToleranceChoosesLargerMargin() throws {
+    let policy = TaskSizePolicy(
+      small: ReserveRequirement(short: 16, weekly: 16),
+      medium: TaskSizePolicy.default.medium,
+      large: TaskSizePolicy.default.large,
+      neutralTolerance: 0.125
+    )
+
+    let result = RecommendationEngine(policy: policy).recommend(
+      taskSize: .small,
+      snapshots: [
+        .codex: try snapshot(.codex, short: 32, weekly: 32),
+        .claudeCode: try snapshot(.claudeCode, short: 34, weekly: 34),
+      ],
+      staleProviders: [],
+      now: now
+    )
+
+    #expect(result.decision == .provider(.claudeCode))
+    #expect(result.reason == .largerMargin(.claudeCode))
+  }
+
   @Test("neither safe returns every failed constraint and the nearest reset")
   func neitherSafeReturnsEveryFailedConstraintAndNearestReset() throws {
     let codex = try snapshot(.codex, short: 20, weekly: 9, shortReset: 900, weeklyReset: 3_600)

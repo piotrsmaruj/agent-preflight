@@ -8,6 +8,7 @@ let package = Package(
     .library(name: "AgentPreflightDomain", targets: ["AgentPreflightDomain"]),
     .library(name: "AgentPreflightApplication", targets: ["AgentPreflightApplication"]),
     .library(name: "AgentPreflightInfrastructure", targets: ["AgentPreflightInfrastructure"]),
+    .library(name: "AgentPreflightPresentation", targets: ["AgentPreflightPresentation"]),
   ],
   targets: [
     .target(name: "AgentPreflightDomain"),
@@ -19,6 +20,10 @@ let package = Package(
       name: "AgentPreflightInfrastructure",
       dependencies: ["AgentPreflightDomain", "AgentPreflightApplication"],
       linkerSettings: [.linkedFramework("Security")]
+    ),
+    .target(
+      name: "AgentPreflightPresentation",
+      dependencies: ["AgentPreflightDomain", "AgentPreflightApplication"]
     ),
     .testTarget(
       name: "AgentPreflightDomainTests",
@@ -34,6 +39,12 @@ let package = Package(
         "AgentPreflightDomain", "AgentPreflightApplication", "AgentPreflightInfrastructure",
       ],
       resources: [.copy("Fixtures")]
+    ),
+    .testTarget(
+      name: "AgentPreflightPresentationTests",
+      dependencies: [
+        "AgentPreflightDomain", "AgentPreflightApplication", "AgentPreflightPresentation",
+      ]
     ),
   ],
   swiftLanguageModes: [.v6]

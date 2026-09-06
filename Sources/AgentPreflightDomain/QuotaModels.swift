@@ -49,9 +49,9 @@ public struct RemainingPercentage: Codable, Equatable, Sendable {
 public struct QuotaWindow: Codable, Equatable, Sendable {
   public let kind: QuotaWindowKind
   public let remaining: RemainingPercentage
-  public let resetsAt: Date
+  public let resetsAt: Date?
 
-  public init(kind: QuotaWindowKind, remaining: RemainingPercentage, resetsAt: Date) {
+  public init(kind: QuotaWindowKind, remaining: RemainingPercentage, resetsAt: Date?) {
     self.kind = kind
     self.remaining = remaining
     self.resetsAt = resetsAt
@@ -80,7 +80,9 @@ public struct QuotaSnapshot: Codable, Equatable, Sendable {
   }
 
   public func window(_ kind: QuotaWindowKind, validAt date: Date) -> QuotaWindow? {
-    guard let window = windows[kind], window.resetsAt > date else { return nil }
+    guard let window = windows[kind], let resetsAt = window.resetsAt, resetsAt > date else {
+      return nil
+    }
     return window
   }
 

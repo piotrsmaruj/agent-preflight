@@ -24,17 +24,21 @@ public struct ClaudeUsageParser: Sendable {
   private func map(_ source: Window?, to kind: QuotaWindowKind) throws -> QuotaWindow? {
     guard let source else { return nil }
     if source.utilization == nil, source.resetsAt == nil { return nil }
-    guard let utilization = source.utilization,
-      let rawReset = source.resetsAt,
-      let reset = parseDate(rawReset)
-    else {
+    guard let utilization = source.utilization else {
       throw ProviderFailure.unsupportedPayload
     }
+    let reset = try parseOptionalDate(source.resetsAt)
     return QuotaWindow(
       kind: kind,
       remaining: try RemainingPercentage.fromUsed(utilization),
       resetsAt: reset
     )
+  }
+
+  private func parseOptionalDate(_ value: String?) throws -> Date? {
+    guard let value else { return nil }
+    guard let date = parseDate(value) else { throw ProviderFailure.unsupportedPayload }
+    return date
   }
 
   private func parseDate(_ value: String) -> Date? {

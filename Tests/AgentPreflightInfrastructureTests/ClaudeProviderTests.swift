@@ -129,18 +129,58 @@ extension ClaudeProviderTests {
 }
 
 extension ClaudeProviderTests {
-  @Test("parser rejects an invalid percentage and timestamp")
-  func parserRejectsInvalidPercentageAndTimestamp() {
+  @Test("parser rejects an invalid percentage")
+  func parserRejectsInvalidPercentage() {
     let invalidPercent = Data(
       #"{"five_hour":{"utilization":101,"resets_at":"2026-09-04T12:30:00Z"}}"#.utf8
-    )
-    let invalidTimestamp = Data(
-      #"{"five_hour":{"utilization":20,"resets_at":"not-a-date"}}"#.utf8
     )
 
     #expect(throws: ProviderFailure.unsupportedPayload) {
       try ClaudeUsageParser().parse(invalidPercent, fetchedAt: Date())
     }
+  }
+
+  @Test("parser preserves idle quota when the short reset is null")
+  func parserPreservesIdleQuotaWhenShortResetIsNull() throws {
+    let payload = Data(
+      #"{"five_hour":{"utilization":0,"resets_at":null},"seven_day":{"utilization":0,"resets_at":"2026-09-10T08:00:00Z"}}"#
+        .utf8
+    )
+
+    let snapshot = try ClaudeUsageParser().parse(
+      payload,
+      fetchedAt: Date(timeIntervalSince1970: 1_788_505_200)
+    )
+
+    #expect(snapshot.windows[.short]?.remaining.value == 100)
+    #expect(snapshot.windows[.short]?.resetsAt == nil)
+    #expect(snapshot.windows[.weekly]?.remaining.value == 100)
+    #expect(snapshot.windows[.weekly]?.resetsAt == Date(timeIntervalSince1970: 1_789_027_200))
+  }
+
+  @Test("parser preserves quota when both reset dates are missing")
+  func parserPreservesQuotaWhenBothResetDatesAreMissing() throws {
+    let payload = Data(
+      #"{"five_hour":{"utilization":25},"seven_day":{"utilization":50}}"#.utf8
+    )
+
+    let snapshot = try ClaudeUsageParser().parse(
+      payload,
+      fetchedAt: Date(timeIntervalSince1970: 1_788_505_200)
+    )
+
+    #expect(snapshot.windows[.short]?.remaining.value == 75)
+    #expect(snapshot.windows[.short]?.resetsAt == nil)
+    #expect(snapshot.windows[.weekly]?.remaining.value == 50)
+    #expect(snapshot.windows[.weekly]?.resetsAt == nil)
+  }
+
+  @Test("parser rejects a malformed non-null reset timestamp")
+  func parserRejectsMalformedNonNullResetTimestamp() {
+    let invalidTimestamp = Data(
+      #"{"five_hour":{"utilization":20,"resets_at":"not-a-date"}}"#.utf8
+    )
+
     #expect(throws: ProviderFailure.unsupportedPayload) {
       try ClaudeUsageParser().parse(invalidTimestamp, fetchedAt: Date())
     }

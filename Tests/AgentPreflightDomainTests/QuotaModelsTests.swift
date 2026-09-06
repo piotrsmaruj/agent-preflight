@@ -40,4 +40,37 @@ struct QuotaModelsTests {
       try QuotaSnapshot(provider: .codex, windows: [first, second], fetchedAt: date)
     }
   }
+
+  @Test("a nil reset survives a Codable round trip")
+  func nilResetSurvivesCodableRoundTrip() throws {
+    let window = QuotaWindow(
+      kind: .short,
+      remaining: try RemainingPercentage(remaining: 100),
+      resetsAt: nil
+    )
+
+    let encoded = try JSONEncoder().encode(window)
+    let decoded = try JSONDecoder().decode(QuotaWindow.self, from: encoded)
+
+    #expect(decoded == window)
+    #expect(decoded.resetsAt == nil)
+  }
+
+  @Test("snapshot validity excludes unknown and expired resets")
+  func snapshotValidityExcludesUnknownAndExpiredResets() throws {
+    let now = Date(timeIntervalSince1970: 2_000_000_000)
+    let futureReset = Date(timeIntervalSince1970: 2_000_003_600)
+    let remaining = try RemainingPercentage(remaining: 100)
+    let unknownReset = QuotaWindow(kind: .short, remaining: remaining, resetsAt: nil)
+    let knownReset = QuotaWindow(kind: .weekly, remaining: remaining, resetsAt: futureReset)
+    let snapshot = try QuotaSnapshot(
+      provider: .claudeCode,
+      windows: [unknownReset, knownReset],
+      fetchedAt: now
+    )
+
+    #expect(snapshot.window(.short, validAt: now) == nil)
+    #expect(snapshot.window(.weekly, validAt: now) == knownReset)
+    #expect(snapshot.window(.weekly, validAt: futureReset) == nil)
+  }
 }

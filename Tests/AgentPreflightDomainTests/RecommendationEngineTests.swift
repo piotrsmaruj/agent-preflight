@@ -241,6 +241,26 @@ struct RecommendationEngineTests {
     #expect(weeklyFailures.first?.scopeLabel == nil)
   }
 
+  /// The live payload reports both weekly windows at the same utilization, so the tie decides the
+  /// copy a user actually sees; it must stay on the all-models week rather than name a model.
+  @Test("weekly windows that are tied leave the all-models week binding")
+  func tiedWeeklyWindowsLeaveAllModelsWeekBinding() throws {
+    let claude = try scopedSnapshot(.claudeCode, short: 90, weekly: 5, scoped: 5)
+
+    let result = RecommendationEngine().recommend(
+      taskSize: .medium,
+      snapshots: [.codex: try snapshot(.codex, short: 20, weekly: 50), .claudeCode: claude],
+      staleProviders: [],
+      now: now
+    )
+
+    #expect(result.decision == .noSafeChoice)
+    let weeklyFailures = result.failures.filter { $0.provider == .claudeCode }
+    #expect(weeklyFailures.count == 1)
+    #expect(weeklyFailures.first?.window == .weekly)
+    #expect(weeklyFailures.first?.scopeLabel == nil)
+  }
+
   @Test("a model-scoped week without a known reset makes the recommendation unavailable")
   func modelScopedWeekWithoutKnownResetMakesRecommendationUnavailable() throws {
     let claude = try scopedSnapshot(

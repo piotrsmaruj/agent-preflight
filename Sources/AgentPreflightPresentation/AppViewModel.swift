@@ -88,7 +88,7 @@ public final class AppViewModel: ObservableObject {
     now: Date
   ) -> ProviderCardModel {
     let windows = status?.snapshot.map { Array($0.windows.values) } ?? []
-    let weeklyTitle = weeklyTitle(for: windows)
+    let weeklyTitle = weeklyRowTitle(for: windows)
     let rows =
       windows
       .sorted { sortIndex($0.kind) < sortIndex($1.kind) }
@@ -104,7 +104,7 @@ public final class AppViewModel: ObservableObject {
 
   /// Names the all-models week only on a card that also shows a model-scoped week, so a provider
   /// with a single weekly window keeps the shorter, unambiguous title.
-  private func weeklyTitle(for windows: [QuotaWindow]) -> String {
+  private func weeklyRowTitle(for windows: [QuotaWindow]) -> String {
     windows.contains { $0.kind == .modelWeekly } ? "Weekly · all models" : "Weekly"
   }
 

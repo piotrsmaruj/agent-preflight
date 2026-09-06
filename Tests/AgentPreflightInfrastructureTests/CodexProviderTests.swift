@@ -268,6 +268,160 @@ extension CodexProviderTests {
 }
 
 extension CodexProviderTests {
+  @Test("real session round-trips lines while the child stays alive")
+  func realSessionRoundTripsLinesWhileChildStaysAlive() async throws {
+    let session = try await launchEchoingChild()
+
+    try await session.send(Data(#"{"id":0}"#.utf8))
+    let first = try await receiveLine(from: session)
+    try await session.send(Data(#"{"id":1}"#.utf8))
+    let second = try await receiveLine(from: session)
+    await session.terminate()
+
+    #expect(first == Data(#"{"id":0}"#.utf8))
+    #expect(second == Data(#"{"id":1}"#.utf8))
+  }
+
+  @Test("real session splits two lines delivered in one chunk")
+  func realSessionSplitsTwoLinesDeliveredInOneChunk() async throws {
+    let session = try await launchEchoingChild()
+    var batchedLines = Data(#"{"id":0}"#.utf8)
+    batchedLines.append(0x0A)
+    batchedLines.append(contentsOf: Data(#"{"id":1}"#.utf8))
+
+    try await session.send(batchedLines)
+    let first = try await receiveLine(from: session)
+    let second = try await receiveLine(from: session)
+    await session.terminate()
+
+    #expect(first == Data(#"{"id":0}"#.utf8))
+    #expect(second == Data(#"{"id":1}"#.utf8))
+  }
+
+  @Test("real session termination is idempotent and reports an exit status")
+  func realSessionTerminationIsIdempotentAndReportsExitStatus() async throws {
+    let session = try await launchEchoingChild()
+
+    await session.terminate()
+    await session.terminate()
+    let status = await session.waitForExit()
+
+    #expect(status >= 0)
+    #expect(await session.isChildRunning() == false)
+  }
+
+  @Test("real session reports end of output when the child exits")
+  func realSessionReportsEndOfOutputWhenChildExits() async throws {
+    let session = try await launchChild(
+      executablePath: "/bin/echo",
+      arguments: [#"{"id":0}"#]
+    )
+
+    let first = try await receiveLine(from: session)
+    let second = try await receiveLine(from: session)
+    let status = await session.waitForExit()
+    await session.terminate()
+
+    #expect(first == Data(#"{"id":0}"#.utf8))
+    #expect(second == nil)
+    #expect(status == 0)
+  }
+
+  @Test(
+    "termination escalates to SIGKILL when the child ignores SIGTERM",
+    .enabled(
+      if: FileManager.default.isExecutableFile(atPath: "/usr/bin/perl"),
+      "Requires /usr/bin/perl to run a child that ignores SIGTERM"
+    )
+  )
+  func terminationEscalatesToSIGKILLWhenChildIgnoresSIGTERM() async throws {
+    let session = try await launchChild(
+      executablePath: "/usr/bin/perl",
+      arguments: [
+        "-e", #"$SIG{TERM} = "IGNORE"; $| = 1; print "ready\n"; sleep 1 while 1;"#,
+      ]
+    )
+    // The child announces itself once the handler is installed, so SIGTERM cannot win a startup race.
+    #expect(try await receiveLine(from: session) == Data("ready".utf8))
+
+    let startedTerminatingAt = Date()
+    await session.terminate()
+    let terminationSeconds = Date().timeIntervalSince(startedTerminatingAt)
+    let status = await session.waitForExit()
+
+    #expect(terminationSeconds < 5)
+    #expect(await session.isChildRunning() == false)
+    #expect(status == SIGKILL)
+  }
+
+  @Test("client maps a silent real child to a timeout and leaves no process behind")
+  func clientMapsSilentRealChildToTimeout() async throws {
+    let launcher = FixedChildProcessLauncher(
+      executableURL: URL(fileURLWithPath: "/bin/dd"),
+      arguments: ["of=/dev/null"]
+    )
+    let client = CodexAppServerClient(launcher: launcher, timeoutSeconds: 0.2)
+
+    await #expect(throws: ProviderFailure.timeout) {
+      try await client.readRateLimits(executableURL: URL(fileURLWithPath: "/bin/dd"))
+    }
+
+    let session = try #require(await launcher.launchedSession)
+    #expect(await session.isChildRunning() == false)
+  }
+
+  private func launchEchoingChild() async throws -> FoundationJSONLineProcessSession {
+    try await launchChild(executablePath: "/bin/cat")
+  }
+
+  private func launchChild(
+    executablePath: String,
+    arguments: [String] = []
+  ) async throws -> FoundationJSONLineProcessSession {
+    let session = try await FoundationJSONLineProcessLauncher().launch(
+      executableURL: URL(fileURLWithPath: executablePath),
+      arguments: arguments
+    )
+    return try #require(session as? FoundationJSONLineProcessSession)
+  }
+
+  /// Bounds a read from a real child: an unanswered read ends when the watchdog stops the child.
+  private func receiveLine(
+    from session: FoundationJSONLineProcessSession,
+    within seconds: Double = 3
+  ) async throws -> Data? {
+    let watchdog = Task {
+      try? await Task.sleep(for: .seconds(seconds))
+      guard !Task.isCancelled else { return }
+      await session.terminate()
+    }
+    defer { watchdog.cancel() }
+    return try await session.receive()
+  }
+}
+
+/// Launches one fixed real child, ignoring the executable and arguments the caller asks for.
+private actor FixedChildProcessLauncher: JSONLineProcessLaunching {
+  private let executableURL: URL
+  private let arguments: [String]
+  private(set) var launchedSession: FoundationJSONLineProcessSession?
+
+  init(executableURL: URL, arguments: [String]) {
+    self.executableURL = executableURL
+    self.arguments = arguments
+  }
+
+  func launch(executableURL: URL, arguments: [String]) async throws -> any JSONLineProcessSession {
+    let session = try await FoundationJSONLineProcessLauncher().launch(
+      executableURL: self.executableURL,
+      arguments: self.arguments
+    )
+    launchedSession = session as? FoundationJSONLineProcessSession
+    return session
+  }
+}
+
+extension CodexProviderTests {
   @Test(
     "live Codex usage works when explicitly enabled",
     .enabled(

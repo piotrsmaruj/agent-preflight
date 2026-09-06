@@ -45,6 +45,27 @@ struct ClaudeProviderTests {
     #expect(snapshot.windows[.weekly]?.remaining.value == 58)
   }
 
+  @Test("provider rejects a successful response served from a foreign final URL")
+  func providerRejectsSuccessfulResponseFromForeignFinalURL() async throws {
+    let transport = HTTPClientSpy(
+      statusCode: 200,
+      data: try fixture("claude-success"),
+      finalURL: try #require(URL(string: "https://evil.example.com/api/oauth/usage"))
+    )
+    let provider = ClaudeQuotaProvider(
+      credentialReader: CredentialReaderStub(token: "fixture-token-never-log"),
+      httpClient: transport,
+      parser: ClaudeUsageParser(),
+      clock: FixedClock(now: Date(timeIntervalSince1970: 1_788_505_200)),
+      configuration: .live,
+      timeoutSeconds: 5
+    )
+
+    await #expect(throws: ProviderFailure.protocolFailure) {
+      try await provider.fetchSnapshot()
+    }
+  }
+
   @Test("credential decoder rejects a missing OAuth token")
   func credentialDecoderRejectsMissingOAuthToken() {
     #expect(throws: ProviderFailure.invalidCredential) {
@@ -97,7 +118,7 @@ extension ClaudeProviderTests {
   }
 
   @Test("Keychain reader maps missing and denied items without inspecting payloads")
-  func keychainReaderMapsMissingAndDeniedItemsWithoutInspectingPayloads() throws {
+  func keychainReaderMapsMissingAndDeniedItemsWithoutInspectingPayloads() async throws {
     let service = ClaudeProviderConfiguration.live.keychainService
     let missing = KeychainClaudeCredentialReader(
       service: service,
@@ -108,23 +129,23 @@ extension ClaudeProviderTests {
       loader: KeychainLoaderStub(result: .status(errSecUserCanceled))
     )
 
-    #expect(throws: ProviderFailure.unauthenticated) {
-      try missing.readAccessToken()
+    await #expect(throws: ProviderFailure.unauthenticated) {
+      try await missing.readAccessToken()
     }
-    #expect(throws: ProviderFailure.keychainDenied) {
-      try denied.readAccessToken()
+    await #expect(throws: ProviderFailure.keychainDenied) {
+      try await denied.readAccessToken()
     }
   }
 
   @Test("Keychain reader decodes the expected Claude OAuth envelope")
-  func keychainReaderDecodesExpectedClaudeOAuthEnvelope() throws {
+  func keychainReaderDecodesExpectedClaudeOAuthEnvelope() async throws {
     let data = Data(#"{"claudeAiOauth":{"accessToken":"fixture-secret"}}"#.utf8)
     let reader = KeychainClaudeCredentialReader(
       service: ClaudeProviderConfiguration.live.keychainService,
       loader: KeychainLoaderStub(result: .data(data))
     )
 
-    #expect(String(describing: try reader.readAccessToken()) == "<redacted>")
+    #expect(String(describing: try await reader.readAccessToken()) == "<redacted>")
   }
 }
 
@@ -374,19 +395,23 @@ private struct FixedClock: Clock {
 
 private struct CredentialReaderStub: ClaudeCredentialReader {
   let token: String
-  func readAccessToken() throws -> SensitiveToken { try SensitiveToken(token) }
+  func readAccessToken() async throws -> SensitiveToken { try SensitiveToken(token) }
 }
 
 private actor HTTPClientSpy: HTTPClient {
   private(set) var lastRequest: URLRequest?
   let response: HTTPResponse
 
-  init(statusCode: Int, data: Data) {
+  init(
+    statusCode: Int,
+    data: Data,
+    finalURL: URL = ClaudeProviderConfiguration.live.usageURL
+  ) {
     self.response = HTTPResponse(
       data: data,
       statusCode: statusCode,
       headers: [:],
-      finalURL: ClaudeProviderConfiguration.live.usageURL
+      finalURL: finalURL
     )
   }
 
@@ -402,7 +427,7 @@ private actor HTTPClientSpy: HTTPClient {
 private struct KeychainLoaderStub: KeychainCredentialLoading {
   let result: KeychainCredentialResult
 
-  func loadGenericPassword(service: String) -> KeychainCredentialResult { result }
+  func loadGenericPassword(service: String) async -> KeychainCredentialResult { result }
 }
 
 private struct BlockingHTTPClient: HTTPClient {

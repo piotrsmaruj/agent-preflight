@@ -27,8 +27,10 @@ public struct ClaudeQuotaProvider: QuotaProvider {
     self.timeoutSeconds = timeoutSeconds
   }
 
+  /// The credential read stays outside `withTimeout` on purpose: the timeout bounds the network
+  /// request only, and a pending Keychain access prompt must never be raced by a network timer.
   public func fetchSnapshot() async throws -> QuotaSnapshot {
-    let token = try credentialReader.readAccessToken()
+    let token = try await credentialReader.readAccessToken()
     let request = makeRequest(token: token)
     do {
       return try await withTimeout(seconds: timeoutSeconds) {

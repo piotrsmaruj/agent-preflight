@@ -16,7 +16,7 @@ public struct SensitiveToken: Sendable, CustomStringConvertible, CustomDebugStri
 }
 
 public protocol ClaudeCredentialReader: Sendable {
-  func readAccessToken() throws -> SensitiveToken
+  func readAccessToken() async throws -> SensitiveToken
 }
 
 public struct ClaudeCredentialDecoder: Sendable {

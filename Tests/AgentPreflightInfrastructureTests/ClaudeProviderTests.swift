@@ -99,10 +99,7 @@ struct ClaudeProviderTests {
   }
 
   private func fixture(_ name: String) throws -> Data {
-    let url = try #require(
-      Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures")
-    )
-    return try Data(contentsOf: url)
+    try loadFixture(name)
   }
 }
 
@@ -226,6 +223,37 @@ extension ClaudeProviderTests {
       #expect(error == .rateLimited(retryAfter: nil))
       #expect(!String(describing: error).contains("fixture-secret-body"))
     }
+  }
+
+  @Test("provider reports a refused redirect as a protocol failure, not a network problem")
+  func providerReportsRefusedRedirectAsProtocolFailure() async throws {
+    for transportError in [
+      HTTPClientError.redirectRejected, .nonHTTPSRequest, .invalidResponse,
+    ] {
+      await #expect(throws: ProviderFailure.protocolFailure) {
+        try await makeProvider(httpClient: ThrowingHTTPClient(error: transportError))
+          .fetchSnapshot()
+      }
+    }
+  }
+
+  @Test("provider reports a transport failure as an unreachable network")
+  func providerReportsTransportFailureAsNetworkUnavailable() async throws {
+    await #expect(throws: ProviderFailure.networkUnavailable) {
+      try await makeProvider(httpClient: ThrowingHTTPClient(error: .transportFailure))
+        .fetchSnapshot()
+    }
+  }
+
+  private func makeProvider(httpClient: any HTTPClient) -> ClaudeQuotaProvider {
+    ClaudeQuotaProvider(
+      credentialReader: CredentialReaderStub(token: "fixture-token-never-log"),
+      httpClient: httpClient,
+      parser: ClaudeUsageParser(),
+      clock: FixedClock(now: Date(timeIntervalSince1970: 1_788_505_200)),
+      configuration: .live,
+      timeoutSeconds: 5
+    )
   }
 
   @Test("provider cancels a blocked transport at timeout")
@@ -387,6 +415,156 @@ extension ClaudeProviderTests {
   }
 }
 
+/// The stub protocol keeps process-wide state, so these tests must not overlap each other.
+@Suite("Redirect enforcement", .serialized)
+struct URLSessionHTTPClientRedirectTests {
+  private static let origin = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+  private static let authorizationHeader = "Bearer fixture-token-never-log"
+
+  @Test("client refuses a foreign-host redirect and never forwards the token to it")
+  func clientRefusesForeignHostRedirectAndNeverForwardsToken() async throws {
+    ScriptedURLProtocol.reset(
+      script: [.redirect(location: "https://evil.example.com/api/oauth/usage")]
+    )
+    defer { ScriptedURLProtocol.reset(script: []) }
+
+    await #expect(throws: HTTPClientError.redirectRejected) {
+      try await client().send(originRequest(), redirectPolicy: policy())
+    }
+
+    let recorded = ScriptedURLProtocol.recordedRequests()
+    #expect(recorded.count == 1)
+    #expect(recorded.allSatisfy { $0.url?.host != "evil.example.com" })
+    #expect(
+      recorded
+        .filter { $0.value(forHTTPHeaderField: "Authorization") != nil }
+        .allSatisfy { $0.url?.host == "api.anthropic.com" }
+    )
+  }
+
+  @Test("client follows a same-host redirect and returns the final response")
+  func clientFollowsSameHostRedirectAndReturnsFinalResponse() async throws {
+    ScriptedURLProtocol.reset(
+      script: [
+        .redirect(location: "https://api.anthropic.com/api/oauth/usage-v2"),
+        .success(statusCode: 200, body: try loadFixture("claude-success")),
+      ]
+    )
+    defer { ScriptedURLProtocol.reset(script: []) }
+
+    let response = try await client().send(originRequest(), redirectPolicy: policy())
+
+    #expect(response.statusCode == 200)
+    #expect(response.finalURL.host == "api.anthropic.com")
+    #expect(response.data == (try loadFixture("claude-success")))
+    #expect(ScriptedURLProtocol.recordedRequests().count == 2)
+  }
+
+  @Test("client rejects a plain HTTP request before it reaches the transport")
+  func clientRejectsPlainHTTPRequestBeforeTransport() async throws {
+    ScriptedURLProtocol.reset(script: [.success(statusCode: 200, body: Data())])
+    defer { ScriptedURLProtocol.reset(script: []) }
+    let insecureURL = try #require(URL(string: "http://api.anthropic.com/api/oauth/usage"))
+
+    await #expect(throws: HTTPClientError.nonHTTPSRequest) {
+      try await client().send(URLRequest(url: insecureURL), redirectPolicy: policy())
+    }
+
+    #expect(ScriptedURLProtocol.recordedRequests().isEmpty)
+  }
+
+  private func client() -> URLSessionHTTPClient {
+    URLSessionHTTPClient(protocolClasses: [ScriptedURLProtocol.self])
+  }
+
+  private func policy() -> SameHostRedirectPolicy {
+    SameHostRedirectPolicy(origin: Self.origin)
+  }
+
+  private func originRequest() -> URLRequest {
+    var request = URLRequest(url: Self.origin)
+    request.setValue(Self.authorizationHeader, forHTTPHeaderField: "Authorization")
+    return request
+  }
+}
+
+/// Answers requests from a scripted list and records every request the transport actually issued.
+private final class ScriptedURLProtocol: URLProtocol, @unchecked Sendable {
+  enum ScriptedResponse: Sendable {
+    case redirect(location: String)
+    case success(statusCode: Int, body: Data)
+  }
+
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var script: [ScriptedResponse] = []
+  nonisolated(unsafe) private static var recorded: [URLRequest] = []
+
+  static func reset(script newScript: [ScriptedResponse]) {
+    lock.withLock {
+      script = newScript
+      recorded = []
+    }
+  }
+
+  static func recordedRequests() -> [URLRequest] {
+    lock.withLock { recorded }
+  }
+
+  private static func nextResponse(for request: URLRequest) -> ScriptedResponse? {
+    lock.withLock {
+      recorded.append(request)
+      return script.isEmpty ? nil : script.removeFirst()
+    }
+  }
+
+  override class func canInit(with request: URLRequest) -> Bool { true }
+
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+  override func startLoading() {
+    guard let url = request.url, let scripted = Self.nextResponse(for: request) else {
+      client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+      return
+    }
+    switch scripted {
+    case .redirect(let location):
+      let response = HTTPURLResponse(
+        url: url,
+        statusCode: 302,
+        httpVersion: "HTTP/1.1",
+        headerFields: ["Location": location]
+      )!
+      var redirected = URLRequest(url: URL(string: location)!)
+      redirected.httpMethod = request.httpMethod
+      // URLSession carries the original headers onto the proposed request, so the stub must too:
+      // that is exactly what a foreign-host redirect would leak.
+      redirected.allHTTPHeaderFields = request.allHTTPHeaderFields
+      client?.urlProtocol(self, wasRedirectedTo: redirected, redirectResponse: response)
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocolDidFinishLoading(self)
+    case .success(let statusCode, let body):
+      let response = HTTPURLResponse(
+        url: url,
+        statusCode: statusCode,
+        httpVersion: "HTTP/1.1",
+        headerFields: [:]
+      )!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: body)
+      client?.urlProtocolDidFinishLoading(self)
+    }
+  }
+
+  override func stopLoading() {}
+}
+
+private func loadFixture(_ name: String) throws -> Data {
+  let url = try #require(
+    Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures")
+  )
+  return try Data(contentsOf: url)
+}
+
 private struct FixedClock: Clock {
   let current: Date
   init(now: Date) { self.current = now }
@@ -437,6 +615,17 @@ private struct BlockingHTTPClient: HTTPClient {
   ) async throws -> HTTPResponse {
     try await Task.sleep(for: .seconds(60))
     throw HTTPClientError.transportFailure
+  }
+}
+
+private struct ThrowingHTTPClient: HTTPClient {
+  let error: HTTPClientError
+
+  func send(
+    _ request: URLRequest,
+    redirectPolicy: SameHostRedirectPolicy
+  ) async throws -> HTTPResponse {
+    throw error
   }
 }
 

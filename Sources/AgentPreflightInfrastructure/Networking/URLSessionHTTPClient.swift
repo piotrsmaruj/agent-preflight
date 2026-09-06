@@ -1,7 +1,13 @@
 import Foundation
 
 public struct URLSessionHTTPClient: HTTPClient {
-  public init() {}
+  /// Test seam only: production callers leave this nil so the ephemeral configuration keeps the
+  /// system protocol stack.
+  private let protocolClasses: [AnyClass]?
+
+  public init(protocolClasses: [AnyClass]? = nil) {
+    self.protocolClasses = protocolClasses
+  }
 
   public func send(
     _ request: URLRequest,
@@ -11,14 +17,7 @@ public struct URLSessionHTTPClient: HTTPClient {
       throw HTTPClientError.nonHTTPSRequest
     }
     let delegate = RedirectDelegate(policy: redirectPolicy)
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.urlCache = nil
-    configuration.httpCookieStorage = nil
-    let session = URLSession(
-      configuration: configuration,
-      delegate: delegate,
-      delegateQueue: nil
-    )
+    let session = makeSession(delegate: delegate)
     defer { session.invalidateAndCancel() }
 
     do {
@@ -41,6 +40,14 @@ public struct URLSessionHTTPClient: HTTPClient {
     } catch {
       throw HTTPClientError.transportFailure
     }
+  }
+
+  private func makeSession(delegate: RedirectDelegate) -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.urlCache = nil
+    configuration.httpCookieStorage = nil
+    if let protocolClasses { configuration.protocolClasses = protocolClasses }
+    return URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
   }
 }
 

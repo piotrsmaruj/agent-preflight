@@ -46,8 +46,19 @@ public struct ClaudeQuotaProvider: QuotaProvider {
       }
     } catch let failure as ProviderFailure {
       throw failure
+    } catch let transportError as HTTPClientError {
+      throw Self.failure(for: transportError)
     } catch {
       throw ProviderFailure.networkUnavailable
+    }
+  }
+
+  /// A refused redirect, a non-HTTPS request, and a non-HTTP response are contract violations, not
+  /// connectivity problems: reporting them as a network outage would hide the rejection.
+  private static func failure(for transportError: HTTPClientError) -> ProviderFailure {
+    switch transportError {
+    case .redirectRejected, .nonHTTPSRequest, .invalidResponse: .protocolFailure
+    case .transportFailure: .networkUnavailable
     }
   }
 

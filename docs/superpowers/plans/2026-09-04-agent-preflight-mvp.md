@@ -108,6 +108,19 @@
 - Claude currently uses `GET https://api.anthropic.com/api/oauth/usage`, `anthropic-beta: oauth-2025-04-20`, and a bearer token from `Claude Code-credentials`; `five_hour` and `seven_day` contain `utilization` from 0 through 100 and ISO-8601 `resets_at`.
 - The Claude contract is not public/stable. Task 2 is a hard stop/go checkpoint before the remaining implementation budget is spent.
 
+## Live-contract correction (confirmed during Task 2)
+
+The real Claude endpoint returned HTTP 200 with valid utilization but a null `five_hour.resets_at`. This supersedes the mandatory reset timestamp in the code examples below:
+
+- Task 2 also updates `QuotaWindow.resetsAt` and its initializer to `Date?`; valid percentages survive absent/null resets. Invalid non-null reset strings remain errors.
+- `QuotaSnapshot.window(_:validAt:)` returns nil unless a reset is known and in the future. Never synthesize reset times.
+- Task 4 keeps comparison unavailable for unknown-reset windows; unwrap the already-validated reset when creating `ConstraintFailure`, without forced unwraps. Add an unknown-reset exclusion test.
+- Task 6 tests round-trip persistence of a normalized window without a reset.
+- Task 7 displays the reported percentage and `Reset unavailable` when a reset is unknown; this differs from an expired known window, which still displays `Remaining unknown` and `Refresh required`. Add presentation/accessibility coverage.
+- Task 9 documents this limitation. No endpoint or request header change is required by the observed failure.
+
+The original task code below must be adapted to these confirmed contract changes; all other constraints remain binding.
+
 ## Timeboxes and Stop Rule
 
 - Timebox Task 1 to 20 minutes and the deterministic portion of Task 2 to 30 minutes.

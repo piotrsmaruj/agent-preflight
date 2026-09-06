@@ -78,13 +78,15 @@ The domain is independent of SwiftUI, HTTP, processes, and Keychain.
 
 - `ProviderIdentifier`: `codex` or `claudeCode`.
 - `QuotaWindowKind`: `short` or `weekly`.
-- `QuotaWindow`: remaining percentage, reset timestamp, and kind.
+- `QuotaWindow`: remaining percentage, optional reset timestamp, and kind.
 - `QuotaSnapshot`: provider, available windows, and fetch timestamp.
 - `TaskSize`: `small`, `medium`, or `large`.
 - `TaskSizePolicy`: required remaining percentage per window for each task size.
 - `Recommendation`: recommended provider, neutral choice, no safe choice, or unavailable, plus an explanation.
 
 Percentages are validated at the infrastructure boundary and clamped only when a provider returns a small floating-point deviation outside 0–100. Structurally invalid data is rejected instead of silently converted.
+
+Live compatibility finding: Claude can return valid utilization with a null reset for an idle window. Preserve the percentage and represent the missing reset explicitly. Display `Reset unavailable`; do not invent a timestamp. Windows with unknown reset times are excluded from cross-provider recommendations. A non-null malformed reset remains an unsupported payload.
 
 ### Provider boundary
 

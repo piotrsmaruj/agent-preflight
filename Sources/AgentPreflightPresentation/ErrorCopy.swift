@@ -17,7 +17,10 @@ public enum ErrorCopy {
     case .rateLimited: "Usage lookup is rate limited. Wait a moment, then refresh."
     case .unsupportedPayload: "This provider version returned an unsupported usage format."
     case .processFailure: "Codex app-server exited before returning usage."
-    case .protocolFailure: "Codex app-server returned an invalid protocol response."
+    case .protocolFailure:
+      provider == .codex
+        ? "Codex app-server returned an invalid protocol response."
+        : "Claude usage endpoint returned an unexpected response. Refresh to try again."
     case .networkUnavailable: "Usage could not be reached. Check the network, then refresh."
     }
   }

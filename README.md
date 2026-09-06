@@ -5,6 +5,7 @@ Choose the safer subscription-backed coding agent before starting a task.
 ## What it does
 
 - Shows remaining short-window and weekly quota for Codex and Claude Code.
+- Shows Claude's model-scoped week (`Weekly · Fable`) next to the all-models week whenever the usage endpoint reports one.
 - Recommends the safer option for an S, M, or L task using documented fixed reserves.
 - Runs locally with no backend, analytics, account, or background polling.
 
@@ -54,7 +55,7 @@ Codex remains responsible for its credentials through app-server. Agent Prefligh
 | M | 35% | 10% |
 | L | 60% | 20% |
 
-For each provider the app takes the lower of `short remaining / required short` and `weekly remaining / required weekly`. One safe provider wins. When both are safe, the larger minimum margin wins; a difference below `0.10` is neutral. Missing, stale, or expired data disables comparison. “Safer choice” is a conservative quota comparison, not a guarantee that a task will finish.
+For each provider the app takes the lower of `short remaining / required short` and `weekly remaining / required weekly`. When Claude reports a model-scoped week, the weekly ratio uses whichever of the two weekly windows has less quota left, and an explanation names that model. One safe provider wins. When both are safe, the larger minimum margin wins; a difference below `0.10` is neutral. Missing, stale, or expired data disables comparison. “Safer choice” is a conservative quota comparison, not a guarantee that a task will finish.
 
 ## Tests
 

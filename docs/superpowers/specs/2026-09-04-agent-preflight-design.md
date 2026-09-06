@@ -77,12 +77,14 @@ The domain is independent of SwiftUI, HTTP, processes, and Keychain.
 ### Core values
 
 - `ProviderIdentifier`: `codex` or `claudeCode`.
-- `QuotaWindowKind`: `short` or `weekly`.
-- `QuotaWindow`: remaining percentage, optional reset timestamp, and kind.
+- `QuotaWindowKind`: `short`, `weekly`, or the optional `modelWeekly`.
+- `QuotaWindow`: remaining percentage, optional reset timestamp, kind, and an optional `scopeLabel` naming what a scoped window covers, such as the model of a model-scoped week.
 - `QuotaSnapshot`: provider, available windows, and fetch timestamp.
 - `TaskSize`: `small`, `medium`, or `large`.
 - `TaskSizePolicy`: required remaining percentage per window for each task size.
 - `Recommendation`: recommended provider, neutral choice, no safe choice, or unavailable, plus an explanation.
+
+Only `short` and `weekly` are required from a provider; `QuotaWindowKind.requiredForRecommendation` names them so completeness is never derived from `allCases`. A snapshot without a `modelWeekly` window is complete, because only Claude Code meters a model-scoped week.
 
 Percentages are validated at the infrastructure boundary and clamped only when a provider returns a small floating-point deviation outside 0–100. Structurally invalid data is rejected instead of silently converted.
 
@@ -180,6 +182,8 @@ Security constraints:
 
 Live compatibility finding: an idle window can return a valid `utilization` with a null `resets_at`. A null reset is kept as an unknown reset; the percentage is preserved, `Reset unavailable` is displayed, and the window is excluded from cross-provider recommendations. A non-null malformed reset is an unsupported payload.
 
+The model-scoped week that `/usage` shows as `Weekly · <model>` comes from a newer optional `limits` array rather than from `five_hour`/`seven_day`, which keep carrying the session and the all-models week. The parser reads only the `limits` entries whose `kind` is `weekly_scoped` and that report a `percent`; when several are present it keeps the most consumed one, because that is the limit the task reaches first. Its `scope.model.display_name` becomes the window's `scopeLabel`, falling back to `Model` when the payload does not name it. An absent `limits` array simply produces no `modelWeekly` window, so older responses behave exactly as before.
+
 This endpoint and the Claude credential shape are not a public compatibility contract. They are the primary maintenance risk and are isolated behind `ClaudeQuotaProvider` and fixture-tested parsers.
 
 ## Recommendation Policy
@@ -197,9 +201,11 @@ For provider `p` and selected task size `t`, the safety margin is:
 ```text
 minimum(
   p.shortRemaining / t.requiredShortRemaining,
-  p.weeklyRemaining / t.requiredWeeklyRemaining
+  p.bindingWeeklyRemaining / t.requiredWeeklyRemaining
 )
 ```
+
+The binding weekly window is the more constraining of the all-models week and, when the provider reports one, the model-scoped week; a tie keeps the all-models week. A failed weekly constraint is reported against that window, so the explanation names the model when the scoped week is the one below reserve. A model-scoped window that is present but has an unknown or already passed reset disables the provider's assessment, exactly like a missing required window.
 
 Decision rules:
 

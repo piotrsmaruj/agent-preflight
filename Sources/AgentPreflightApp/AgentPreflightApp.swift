@@ -8,15 +8,20 @@ struct AgentPreflightApplication: App {
   @StateObject private var appViewModel: AppViewModel
   @StateObject private var settingsViewModel: SettingsViewModel
 
+  /// Settings are read once at launch rather than when a view first appears, because the menu bar
+  /// panel must already be painted in the chosen theme the first time it opens.
   init() {
     let dependencies = AppDependencies.live()
     _appViewModel = StateObject(wrappedValue: dependencies.appViewModel)
     _settingsViewModel = StateObject(wrappedValue: dependencies.settingsViewModel)
+    let settingsViewModel = dependencies.settingsViewModel
+    Task { @MainActor in await settingsViewModel.load() }
   }
 
   var body: some Scene {
     MenuBarExtra {
       MenuBarContentView(model: appViewModel)
+        .preferredColorScheme(settingsViewModel.appearance.colorScheme)
     } label: {
       Label("Agent Preflight", systemImage: "gauge.with.dots.needle.50percent")
     }
@@ -24,6 +29,7 @@ struct AgentPreflightApplication: App {
 
     Settings {
       SettingsView(model: settingsViewModel)
+        .preferredColorScheme(settingsViewModel.appearance.colorScheme)
     }
   }
 }

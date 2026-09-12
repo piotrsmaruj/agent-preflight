@@ -6,33 +6,37 @@ import Foundation
 /// Panel state: provider cards, the recommendation for the selected task size, and refresh status.
 ///
 /// Every published value is derived from the latest `RefreshResult` plus the current time, so
-/// changing the task size or ticking the clock re-renders without touching a provider.
+/// changing the task size, the display mode, the reserve policy, or ticking the clock re-renders
+/// without touching a provider.
 @MainActor
 public final class AppViewModel: ObservableObject {
   @Published public var selectedTaskSize: TaskSize { didSet { render() } }
+  @Published public var quotaDisplayMode: QuotaDisplayMode { didSet { render() } }
+  @Published public var taskSizePolicy: TaskSizePolicy { didSet { render() } }
   @Published public private(set) var providerCards: [ProviderCardModel]
   @Published public private(set) var recommendation: RecommendationModel
   @Published public private(set) var isRefreshing = false
   @Published public private(set) var lastRefreshText = "Not refreshed"
 
   private let refreshUseCase: any RefreshQuotaUseCaseProtocol
-  private let recommendationEngine: RecommendationEngine
   private let clock: any Clock
   private let formatter: PresentationFormatter
   private var latestResult: RefreshResult?
 
   public init(
     refreshUseCase: any RefreshQuotaUseCaseProtocol,
-    recommendationEngine: RecommendationEngine,
     clock: any Clock,
     formatter: PresentationFormatter = .init(),
-    selectedTaskSize: TaskSize = .medium
+    selectedTaskSize: TaskSize = .medium,
+    quotaDisplayMode: QuotaDisplayMode = .remaining,
+    taskSizePolicy: TaskSizePolicy = .default
   ) {
     self.refreshUseCase = refreshUseCase
-    self.recommendationEngine = recommendationEngine
     self.clock = clock
     self.formatter = formatter
     self.selectedTaskSize = selectedTaskSize
+    self.quotaDisplayMode = quotaDisplayMode
+    self.taskSizePolicy = taskSizePolicy
     self.providerCards = ProviderIdentifier.allCases.map { provider in
       ProviderCardModel(
         provider: provider,
@@ -73,7 +77,7 @@ public final class AppViewModel: ObservableObject {
     }
     let oldestFetch = result.statuses.values.compactMap { $0.snapshot?.fetchedAt }.min()
     lastRefreshText = oldestFetch.map { formatter.ageText($0, now: now) } ?? "Not refreshed"
-    let decision = recommendationEngine.recommend(
+    let decision = RecommendationEngine(policy: taskSizePolicy).recommend(
       taskSize: selectedTaskSize,
       snapshots: result.eligibleSnapshots,
       staleProviders: result.staleProviders,
@@ -92,7 +96,15 @@ public final class AppViewModel: ObservableObject {
     let rows =
       windows
       .sorted { sortIndex($0.kind) < sortIndex($1.kind) }
-      .map { formatter.row(provider: provider, window: $0, now: now, weeklyTitle: weeklyTitle) }
+      .map {
+        formatter.row(
+          provider: provider,
+          window: $0,
+          now: now,
+          weeklyTitle: weeklyTitle,
+          displayMode: quotaDisplayMode
+        )
+      }
     return ProviderCardModel(
       provider: provider,
       title: formatter.providerTitle(provider),
@@ -128,9 +140,10 @@ public final class AppViewModel: ObservableObject {
         tone: .positive
       )
     case .neutral:
+      let tolerance = String(format: "%.2f", taskSizePolicy.neutralTolerance)
       return RecommendationModel(
         title: "Both look safe",
-        detail: "Their minimum quota margins differ by less than 10%.",
+        detail: "Their minimum quota margins differ by less than \(tolerance).",
         tone: .neutral
       )
     case .noSafeChoice:

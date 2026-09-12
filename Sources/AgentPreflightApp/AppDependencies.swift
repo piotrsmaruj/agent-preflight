@@ -42,13 +42,15 @@ struct AppDependencies {
       diagnostics: OSDiagnosticsSink(),
       configuration: configuration
     )
+    let appViewModel = AppViewModel(refreshUseCase: useCase, clock: clock)
     return Self(
-      appViewModel: AppViewModel(
-        refreshUseCase: useCase,
-        recommendationEngine: RecommendationEngine(),
-        clock: clock
-      ),
-      settingsViewModel: SettingsViewModel(settings: settings, validator: locator)
+      appViewModel: appViewModel,
+      settingsViewModel: SettingsViewModel(
+        settings: settings,
+        validator: locator,
+        onQuotaDisplayModeChange: { [weak appViewModel] in appViewModel?.quotaDisplayMode = $0 },
+        onTaskSizePolicyChange: { [weak appViewModel] in appViewModel?.taskSizePolicy = $0 }
+      )
     )
   }
 

@@ -15,29 +15,44 @@ public struct PresentationFormatter: Sendable {
     provider == .codex ? "Codex" : "Claude Code"
   }
 
+  public func taskSizeTitle(_ size: TaskSize) -> String {
+    switch size {
+    case .small: "Small"
+    case .medium: "Medium"
+    case .large: "Large"
+    }
+  }
+
   /// Renders one window; `weeklyTitle` lets a card that also shows a model-scoped week say which
-  /// weekly window this row is, without the formatter knowing the rest of the card.
+  /// weekly window this row is, without the formatter knowing the rest of the card. `displayMode`
+  /// chooses which half of the window the reader sees, and never changes the textual state, which
+  /// always warns about the quota that is left.
   public func row(
     provider: ProviderIdentifier,
     window: QuotaWindow,
     now: Date,
-    weeklyTitle: String = "Weekly"
+    weeklyTitle: String = "Weekly",
+    displayMode: QuotaDisplayMode = .remaining
   ) -> QuotaRowModel {
-    let percent = Int(window.remaining.value.rounded())
+    let remainingPercent = Int(window.remaining.value.rounded())
     let isExpired = isExpired(window.resetsAt, now: now)
     let windowTitle = title(window, weeklyTitle: weeklyTitle)
-    let remainingText = isExpired ? "Remaining unknown" : "\(percent)% remaining"
+    let percentageText = percentageText(
+      remainingPercent: remainingPercent,
+      displayMode: displayMode,
+      isExpired: isExpired
+    )
     let reset = resetText(window.resetsAt, now: now)
-    let state = stateText(percent: percent, reset: window.resetsAt, now: now)
+    let state = stateText(percent: remainingPercent, reset: window.resetsAt, now: now)
     return QuotaRowModel(
       kind: window.kind,
       title: windowTitle,
-      remainingValue: isExpired ? nil : window.remaining.value,
-      remainingText: remainingText,
+      percentageValue: isExpired ? nil : percentageValue(window.remaining.value, mode: displayMode),
+      percentageText: percentageText,
       resetText: reset,
       stateText: state,
       accessibilityLabel:
-        "\(providerTitle(provider)), \(windowTitle), \(remainingText), \(reset), \(state)"
+        "\(providerTitle(provider)), \(windowTitle), \(percentageText), \(reset), \(state)"
     )
   }
 
@@ -59,6 +74,25 @@ public struct PresentationFormatter: Sendable {
 
   public func failureLabel(_ failure: ConstraintFailure) -> String {
     "\(providerTitle(failure.provider)) \(windowLabel(failure))"
+  }
+
+  /// The used percentage is derived from the already rounded remaining one, so the two display
+  /// modes always add up to 100 instead of disagreeing on a window sitting on a half percent.
+  private func percentageText(
+    remainingPercent: Int,
+    displayMode: QuotaDisplayMode,
+    isExpired: Bool
+  ) -> String {
+    switch (displayMode, isExpired) {
+    case (.remaining, true): "Remaining unknown"
+    case (.used, true): "Usage unknown"
+    case (.remaining, false): "\(remainingPercent)% remaining"
+    case (.used, false): "\(100 - remainingPercent)% used"
+    }
+  }
+
+  private func percentageValue(_ remaining: Double, mode: QuotaDisplayMode) -> Double {
+    mode == .remaining ? remaining : 100 - remaining
   }
 
   private func title(_ window: QuotaWindow, weeklyTitle: String) -> String {

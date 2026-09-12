@@ -489,7 +489,7 @@ extension CodexProviderTests {
   }
 }
 
-private actor SettingsStoreStub: AppSettingsStore {
+private actor SettingsStoreStub: CodexPathSettingsStore {
   let path: String?
 
   init(path: String?) { self.path = path }

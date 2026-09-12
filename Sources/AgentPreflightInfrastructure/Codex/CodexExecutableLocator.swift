@@ -8,13 +8,13 @@ public protocol CodexExecutableLocating: Sendable {
 
 public struct CodexExecutableLocator: CodexExecutableLocating, ExecutablePathValidating {
   public static let standardCandidatePaths = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
-  private let settings: any AppSettingsStore
+  private let settings: any CodexPathSettingsStore
   private let environmentPath: String
   private let isExecutableFile: @Sendable (String) -> Bool
 
   /// `FileManager` is not `Sendable`, so the file probe is injected as a `Sendable` closure.
   public init(
-    settings: any AppSettingsStore,
+    settings: any CodexPathSettingsStore,
     environmentPath: String = ProcessInfo.processInfo.environment["PATH"] ?? "",
     isExecutableFile: @escaping @Sendable (String) -> Bool = {
       FileManager.default.isExecutableFile(atPath: $0)

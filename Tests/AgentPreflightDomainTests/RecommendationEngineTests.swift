@@ -8,12 +8,12 @@ struct RecommendationEngineTests {
   private let now = Date(timeIntervalSince1970: 1_788_505_200)
 
   @Test("default policy contains the exact approved reserves")
-  func defaultPolicyContainsExactApprovedReserves() {
+  func defaultPolicyContainsExactApprovedReserves() throws {
     let policy = TaskSizePolicy.default
 
-    #expect(policy.requirement(for: .small) == ReserveRequirement(short: 15, weekly: 5))
-    #expect(policy.requirement(for: .medium) == ReserveRequirement(short: 35, weekly: 10))
-    #expect(policy.requirement(for: .large) == ReserveRequirement(short: 60, weekly: 20))
+    #expect(policy.requirement(for: .small) == (try ReserveRequirement(short: 15, weekly: 5)))
+    #expect(policy.requirement(for: .medium) == (try ReserveRequirement(short: 35, weekly: 10)))
+    #expect(policy.requirement(for: .large) == (try ReserveRequirement(short: 60, weekly: 20)))
     #expect(policy.neutralTolerance == 0.10)
   }
 
@@ -86,7 +86,7 @@ struct RecommendationEngineTests {
   /// and the case fails the moment the comparison becomes a strict `>`.
   @Test("a margin difference of exactly the tolerance chooses the larger margin")
   func differenceOfExactlyToleranceChoosesLargerMargin() throws {
-    let policy = TaskSizePolicy(
+    let policy = try TaskSizePolicy(
       small: ReserveRequirement(short: 16, weekly: 16),
       medium: TaskSizePolicy.default.medium,
       large: TaskSizePolicy.default.large,

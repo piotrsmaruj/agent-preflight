@@ -44,10 +44,10 @@ private struct QuotaRowView: View {
       HStack {
         Text(model.title).font(.caption)
         Spacer()
-        Text(model.remainingText).font(.caption.weight(.medium))
+        Text(model.percentageText).font(.caption.weight(.medium))
       }
-      if let remainingValue = model.remainingValue {
-        ProgressView(value: remainingValue, total: 100)
+      if let percentageValue = model.percentageValue {
+        ProgressView(value: percentageValue, total: 100)
           .tint(tint)
       }
       HStack {

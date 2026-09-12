@@ -13,7 +13,6 @@ struct AppViewModelTests {
     let useCase = RefreshUseCaseStub(result: try completeResult())
     let model = AppViewModel(
       refreshUseCase: useCase,
-      recommendationEngine: RecommendationEngine(),
       clock: FixedPresentationClock(now: referenceDate)
     )
 
@@ -30,14 +29,13 @@ struct AppViewModelTests {
   func quotaRowHasTextualAndAccessibleState() async throws {
     let model = AppViewModel(
       refreshUseCase: RefreshUseCaseStub(result: try completeResult()),
-      recommendationEngine: RecommendationEngine(),
       clock: FixedPresentationClock(now: referenceDate)
     )
 
     await model.panelOpened()
 
     let row = try #require(model.providerCards.first?.rows.first)
-    #expect(row.remainingText.contains("remaining"))
+    #expect(row.percentageText.contains("remaining"))
     #expect(row.accessibilityLabel.contains("remaining"))
     #expect(!row.stateText.isEmpty)
   }
@@ -46,7 +44,6 @@ struct AppViewModelTests {
   func partialFailureKeepsHealthyProviderCardAndDisablesRecommendation() async throws {
     let model = AppViewModel(
       refreshUseCase: RefreshUseCaseStub(result: try partialFailureResult()),
-      recommendationEngine: RecommendationEngine(),
       clock: FixedPresentationClock(now: referenceDate)
     )
 
@@ -61,7 +58,6 @@ struct AppViewModelTests {
   func totalFailureKeepsBothRecoveryActionsVisible() async {
     let model = AppViewModel(
       refreshUseCase: RefreshUseCaseStub(result: totalFailureResult()),
-      recommendationEngine: RecommendationEngine(),
       clock: FixedPresentationClock(now: referenceDate)
     )
 
@@ -76,7 +72,6 @@ struct AppViewModelTests {
   func initialAndStaleStatesUseTextLabels() async throws {
     let model = AppViewModel(
       refreshUseCase: RefreshUseCaseStub(result: try staleResult()),
-      recommendationEngine: RecommendationEngine(),
       clock: FixedPresentationClock(now: referenceDate)
     )
 
@@ -92,7 +87,6 @@ struct AppViewModelTests {
   func passedResetBecomesUnknownWithoutInventingFullQuota() async throws {
     let model = AppViewModel(
       refreshUseCase: RefreshUseCaseStub(result: try completeResult(shortResetOffset: -1)),
-      recommendationEngine: RecommendationEngine(),
       clock: FixedPresentationClock(now: referenceDate)
     )
 
@@ -102,8 +96,8 @@ struct AppViewModelTests {
       model.providerCards.first { $0.provider == .codex }?.rows.first { $0.kind == .short }
     )
     #expect(short.stateText == "Unknown")
-    #expect(short.remainingText == "Remaining unknown")
-    #expect(short.remainingValue == nil)
+    #expect(short.percentageText == "Remaining unknown")
+    #expect(short.percentageValue == nil)
     #expect(short.resetText == "Refresh required")
     #expect(model.recommendation.title == "Recommendation unavailable")
   }
@@ -112,7 +106,6 @@ struct AppViewModelTests {
   func noSafeChoiceNamesFailedConstraintsAndNearestReset() async throws {
     let model = AppViewModel(
       refreshUseCase: RefreshUseCaseStub(result: try insufficientResult()),
-      recommendationEngine: RecommendationEngine(),
       clock: FixedPresentationClock(now: referenceDate)
     )
 
@@ -128,7 +121,6 @@ struct AppViewModelTests {
   func claudeCardSeparatesAllModelsWeekFromModelScopedWeek() async throws {
     let model = AppViewModel(
       refreshUseCase: RefreshUseCaseStub(result: try modelScopedWeeklyResult(scopedRemaining: 30)),
-      recommendationEngine: RecommendationEngine(),
       clock: FixedPresentationClock(now: referenceDate)
     )
 
@@ -146,7 +138,6 @@ struct AppViewModelTests {
   func noSafeChoiceNamesModelScopedWeekThatBindsWeeklyConstraint() async throws {
     let model = AppViewModel(
       refreshUseCase: RefreshUseCaseStub(result: try modelScopedWeeklyResult(scopedRemaining: 5)),
-      recommendationEngine: RecommendationEngine(),
       clock: FixedPresentationClock(now: referenceDate)
     )
 
@@ -165,8 +156,8 @@ struct AppViewModelTests {
 
     let row = PresentationFormatter().row(provider: .codex, window: window, now: referenceDate)
 
-    #expect(row.remainingText == "100% remaining")
-    #expect(row.remainingValue == 100)
+    #expect(row.percentageText == "100% remaining")
+    #expect(row.percentageValue == 100)
     #expect(row.resetText == "Reset unavailable")
     #expect(row.stateText == "Plenty")
     #expect(row.accessibilityLabel.contains("100% remaining"))
@@ -177,7 +168,6 @@ struct AppViewModelTests {
   func unknownResetDisablesRecommendation() async throws {
     let model = AppViewModel(
       refreshUseCase: RefreshUseCaseStub(result: try unknownShortResetResult()),
-      recommendationEngine: RecommendationEngine(),
       clock: FixedPresentationClock(now: referenceDate)
     )
 
@@ -186,27 +176,110 @@ struct AppViewModelTests {
     #expect(model.recommendation.title == "Recommendation unavailable")
   }
 
-  @Test("settings reject a relative path and save a trimmed absolute path")
-  func settingsRejectRelativePathAndSaveValidatedAbsolutePath() async {
-    let store = SettingsStoreSpy()
-    let model = SettingsViewModel(
-      settings: store,
-      validator: ExecutableValidatorStub(validPath: "/opt/homebrew/bin/codex")
+  @Test("switching to used percentages re-renders the rows without refreshing again")
+  func switchingToUsedPercentagesRerendersRowsWithoutRefreshing() async throws {
+    let useCase = RefreshUseCaseStub(result: try completeResult())
+    let model = AppViewModel(
+      refreshUseCase: useCase,
+      clock: FixedPresentationClock(now: referenceDate)
     )
 
-    model.codexPath = "bin/codex"
-    await model.save()
+    await model.panelOpened()
+    let callsAfterOpen = await useCase.refreshCalls
+    model.quotaDisplayMode = .used
+    let callsAfterSwitch = await useCase.refreshCalls
 
-    #expect(model.validationMessage == "Choose an absolute executable file.")
-    let rejectedValue = await store.path
-    #expect(rejectedValue == nil)
+    let short = try #require(
+      model.providerCards.first { $0.provider == .codex }?.rows.first { $0.kind == .short }
+    )
+    #expect(callsAfterSwitch == callsAfterOpen)
+    #expect(short.percentageText == "20% used")
+    #expect(short.percentageValue == 20)
+    #expect(short.stateText == "Plenty")
+    #expect(short.accessibilityLabel.contains("20% used"))
+  }
 
-    model.codexPath = " /opt/homebrew/bin/codex "
-    await model.save()
+  @Test("used percentages report an expired window as unknown usage")
+  func usedPercentagesReportExpiredWindowAsUnknownUsage() async throws {
+    let model = AppViewModel(
+      refreshUseCase: RefreshUseCaseStub(result: try completeResult(shortResetOffset: -1)),
+      clock: FixedPresentationClock(now: referenceDate),
+      quotaDisplayMode: .used
+    )
 
-    #expect(model.validationMessage == nil)
-    let savedValue = await store.path
-    #expect(savedValue == "/opt/homebrew/bin/codex")
+    await model.panelOpened()
+
+    let short = try #require(
+      model.providerCards.first { $0.provider == .codex }?.rows.first { $0.kind == .short }
+    )
+    #expect(short.percentageText == "Usage unknown")
+    #expect(short.percentageValue == nil)
+  }
+
+  /// Rounding once and subtracting keeps the two modes complementary; rounding each independently
+  /// would show 60% remaining next to 41% used for the same window.
+  @Test("the two display modes always add up to a hundred")
+  func twoDisplayModesAlwaysAddUpToHundred() throws {
+    let window = QuotaWindow(
+      kind: .short,
+      remaining: try .init(remaining: 59.5),
+      resetsAt: referenceDate.addingTimeInterval(3_600)
+    )
+    let formatter = PresentationFormatter()
+
+    let remaining = formatter.row(provider: .codex, window: window, now: referenceDate)
+    let used = formatter.row(
+      provider: .codex,
+      window: window,
+      now: referenceDate,
+      displayMode: .used
+    )
+
+    #expect(remaining.percentageText == "60% remaining")
+    #expect(used.percentageText == "40% used")
+  }
+
+  @Test("a stricter policy changes the recommendation without refreshing again")
+  func stricterPolicyChangesRecommendationWithoutRefreshing() async throws {
+    let useCase = RefreshUseCaseStub(result: try completeResult())
+    let model = AppViewModel(
+      refreshUseCase: useCase,
+      clock: FixedPresentationClock(now: referenceDate)
+    )
+
+    await model.panelOpened()
+    let callsAfterOpen = await useCase.refreshCalls
+    #expect(model.recommendation.title != "No safe choice")
+
+    model.taskSizePolicy = try TaskSizePolicy(
+      small: ReserveRequirement(short: 95, weekly: 95),
+      medium: ReserveRequirement(short: 95, weekly: 95),
+      large: ReserveRequirement(short: 95, weekly: 95),
+      neutralTolerance: 0.10
+    )
+    let callsAfterPolicy = await useCase.refreshCalls
+
+    #expect(callsAfterPolicy == callsAfterOpen)
+    #expect(model.recommendation.title == "No safe choice")
+  }
+
+  @Test("the neutral explanation quotes the configured tolerance")
+  func neutralExplanationQuotesConfiguredTolerance() async throws {
+    let model = AppViewModel(
+      refreshUseCase: RefreshUseCaseStub(result: try completeResult()),
+      clock: FixedPresentationClock(now: referenceDate),
+      taskSizePolicy: try TaskSizePolicy(
+        small: TaskSizePolicy.default.small,
+        medium: TaskSizePolicy.default.medium,
+        large: TaskSizePolicy.default.large,
+        neutralTolerance: 0.75
+      )
+    )
+
+    await model.panelOpened()
+
+    #expect(model.recommendation.title == "Both look safe")
+    #expect(model.recommendation.detail.contains("0.75"))
   }
 }
 
@@ -443,18 +516,4 @@ private actor RefreshUseCaseStub: RefreshQuotaUseCaseProtocol {
     refreshCalls += 1
     return result
   }
-}
-
-private actor SettingsStoreSpy: AppSettingsStore {
-  private(set) var path: String?
-
-  func codexExecutablePath() async -> String? { path }
-
-  func setCodexExecutablePath(_ path: String?) async { self.path = path }
-}
-
-private struct ExecutableValidatorStub: ExecutablePathValidating {
-  let validPath: String
-
-  func isExecutable(path: String) -> Bool { path == validPath }
 }

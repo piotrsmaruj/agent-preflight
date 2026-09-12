@@ -1,12 +1,16 @@
 import AgentPreflightDomain
 
 /// One quota window rendered for display, with every string already formatted.
+///
+/// `percentageValue` and `percentageText` carry whichever half of the window the selected display
+/// mode shows, so the bar and the number always describe the same quantity. `stateText` stays
+/// anchored to the quota that is left, which is what the reader has to act on either way.
 public struct QuotaRowModel: Identifiable, Equatable, Sendable {
   public var id: QuotaWindowKind { kind }
   public let kind: QuotaWindowKind
   public let title: String
-  public let remainingValue: Double?
-  public let remainingText: String
+  public let percentageValue: Double?
+  public let percentageText: String
   public let resetText: String
   public let stateText: String
   public let accessibilityLabel: String
@@ -14,16 +18,16 @@ public struct QuotaRowModel: Identifiable, Equatable, Sendable {
   public init(
     kind: QuotaWindowKind,
     title: String,
-    remainingValue: Double?,
-    remainingText: String,
+    percentageValue: Double?,
+    percentageText: String,
     resetText: String,
     stateText: String,
     accessibilityLabel: String
   ) {
     self.kind = kind
     self.title = title
-    self.remainingValue = remainingValue
-    self.remainingText = remainingText
+    self.percentageValue = percentageValue
+    self.percentageText = percentageText
     self.resetText = resetText
     self.stateText = stateText
     self.accessibilityLabel = accessibilityLabel

@@ -4,9 +4,10 @@ Choose the safer subscription-backed coding agent before starting a task.
 
 ## What it does
 
-- Shows remaining short-window and weekly quota for Codex and Claude Code.
+- Shows remaining — or used — short-window and weekly quota for Codex and Claude Code.
 - Shows Claude's model-scoped week (`Weekly · Fable`) next to the all-models week whenever the usage endpoint reports one.
-- Recommends the safer option for an S, M, or L task using documented fixed reserves.
+- Recommends the safer option for an S, M, or L task using reserves you can edit.
+- Follows the macOS theme, or stays light or dark whatever macOS does.
 - Runs locally with no backend, analytics, account, or background polling.
 
 ## Requirements
@@ -47,7 +48,22 @@ Prefer a native `codex` binary; the Homebrew cask installs one. An npm shim star
 
 Codex remains responsible for its credentials through app-server. Agent Preflight asks macOS Keychain for the existing `Claude Code-credentials` item only during a user-initiated refresh. Tokens are held only for the request lifetime and are never cached or logged. See PRIVACY.md.
 
+## Settings
+
+| Setting | Effect | Takes effect |
+|---|---|---|
+| Theme | System, Light, or Dark. System follows macOS. | Immediately |
+| Quota display | Remaining counts down to empty; Used counts up from zero. The progress bar follows the same direction, while the `Plenty`/`Low` state always describes the quota that is left. | Immediately |
+| Task sizes | The short-window and weekly reserve each size requires, plus the neutral tolerance. | On **Save** |
+| Codex executable | Absolute path used when discovery cannot find `codex`. | On **Save** |
+
+Both percentages describe the same window, so they always add up to 100; the app rounds once and subtracts, rather than rounding each independently.
+
+A reserve is a percentage between 1 and 100 and the neutral tolerance is between 0 and 1. Typed values are validated on save: a rejected entry is reported inline and never reaches the recommendation. **Restore defaults** puts the documented policy back.
+
 ## Recommendation policy
+
+The default reserves, and what **Restore defaults** writes:
 
 | Size | Short-window reserve | Weekly reserve |
 |---|---:|---:|
@@ -55,7 +71,9 @@ Codex remains responsible for its credentials through app-server. Agent Prefligh
 | M | 35% | 10% |
 | L | 60% | 20% |
 
-For each provider the app takes the lower of `short remaining / required short` and `weekly remaining / required weekly`. When Claude reports a model-scoped week, the weekly ratio uses whichever of the two weekly windows has less quota left, and an explanation names that model. One safe provider wins. When both are safe, the larger minimum margin wins; a difference below `0.10` is neutral. Missing, stale, or expired data disables comparison. “Safer choice” is a conservative quota comparison, not a guarantee that a task will finish.
+For each provider the app takes the lower of `short remaining / required short` and `weekly remaining / required weekly`. When Claude reports a model-scoped week, the weekly ratio uses whichever of the two weekly windows has less quota left, and an explanation names that model. One safe provider wins. When both are safe, the larger minimum margin wins; a difference below the neutral tolerance (`0.10` by default) is neutral. Missing, stale, or expired data disables comparison. “Safer choice” is a conservative quota comparison, not a guarantee that a task will finish.
+
+Editing the reserves changes only which provider the app calls safer; it cannot change what a provider actually meters. A reserve of zero is rejected because it would make every provider infinitely safe and silently disable the comparison.
 
 ## Tests
 
@@ -112,8 +130,10 @@ Plain `swift test` requires a full Xcode toolchain, because the Swift Testing fr
 On a machine that only has the Command Line Tools installed, `swift build` works unchanged but `swift test` fails to locate `Testing.framework`. Run the tests from the repository root with the framework search paths pointed at the Command Line Tools developer directory:
 
 ```bash
-env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/swiftpm-module-cache" swift test --disable-sandbox --cache-path .build/cache --config-path .build/config --security-path .build/security --scratch-path .build -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -F -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib
+env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/swiftpm-module-cache" swift test --disable-sandbox --cache-path .build/cache --config-path .build/config --security-path .build/security --scratch-path .build -Xswiftc -plugin-path -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -F -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib
 ```
+
+The `-plugin-path` argument points at the Swift Testing macro plugin. Without it the build stops at `external macro implementation type 'TestingMacros.TestDeclarationMacro' could not be found`, because the Command Line Tools ship the plugin outside the directories the compiler searches by default.
 
 Append `--filter '<SuiteName|testName>'` for a focused run. The same fallback flags apply to `swift build -c release` if it reports a sandbox or module-cache permission error.
 
